@@ -1,0 +1,966 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1012">
+<title>K-ANCHOR · AI 아나운서</title>
+<style>
+:root{
+  --bg:#0f1012; --panel:#17181b; --panel2:#1f2125; --line:#2c2f35;
+  --text:#ecebe8; --sub:#9a9ca3; --accent:#d9c6a3; --accent2:#8fb3c9;
+  --ok:#7fc49a; --warn:#e2b25c; --err:#e07a6e; --live:#e0574a;
+  --r:14px; --dock:76px;
+  --sat:env(safe-area-inset-top); --sab:env(safe-area-inset-bottom);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,"Pretendard","Noto Sans KR","Segoe UI",sans-serif}
+.app{max-width:430px;margin:0 auto;padding:calc(var(--sat) + 10px) 12px calc(var(--dock) + var(--sab) + 18px)}
+header{display:flex;align-items:center;gap:10px;margin:2px 2px 10px}
+header h1{font-size:20px;letter-spacing:.06em;margin:0;font-weight:700}
+header .sp{flex:1}
+header a{color:var(--sub);font-size:16px;text-decoration:none}
+.badge{display:inline-flex;align-items:center;gap:6px;font-size:16px;font-weight:700;letter-spacing:.08em;
+  padding:2px 10px;border-radius:6px;background:#2a2c31;color:var(--sub)}
+.badge i{width:9px;height:9px;border-radius:50%;background:var(--sub)}
+.badge.on{background:var(--live);color:#fff}.badge.on i{background:#fff;animation:pulse 1.1s infinite}
+@keyframes pulse{50%{opacity:.25}}
+
+/* stage */
+.stage{position:relative;border-radius:18px;overflow:hidden;aspect-ratio:3/3.7;border:1px solid var(--line);
+  background:
+   radial-gradient(120% 70% at 50% 108%, #0b1a2b 0%, transparent 60%),
+   radial-gradient(40% 30% at 18% 22%, rgba(143,179,201,.22), transparent 70%),
+   radial-gradient(35% 25% at 84% 30%, rgba(217,198,163,.18), transparent 70%),
+   linear-gradient(180deg,#1b2633 0%,#121a24 55%,#0c1118 100%)}
+.stage::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+   radial-gradient(circle at 12% 60%, rgba(143,179,201,.16) 0 18px, transparent 40px),
+   radial-gradient(circle at 88% 55%, rgba(217,198,163,.14) 0 22px, transparent 46px),
+   radial-gradient(circle at 70% 12%, rgba(255,255,255,.07) 0 14px, transparent 34px),
+   repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 2px, transparent 2px 46px);
+  filter:blur(1px)}
+#cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.lower{position:absolute;left:10px;bottom:10px;pointer-events:none}
+.tag{display:inline-flex;align-items:stretch;border-radius:8px;overflow:hidden;font-weight:700;box-shadow:0 2px 10px rgba(0,0,0,.4)}
+.tag b{background:var(--accent);color:#1a1712;padding:3px 10px;font-size:16px;letter-spacing:.05em}
+.tag span{background:rgba(15,16,18,.86);color:var(--text);padding:3px 10px;font-size:16px;font-weight:500}
+.sub{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:10px;padding:10px 12px;margin-top:8px;min-height:76px;font-size:17px;line-height:1.5}
+.sub .done{color:#fff}.sub .todo{color:#7d8088}
+.ovl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  background:rgba(15,16,18,.72);font-size:16px;color:var(--sub);text-align:center;padding:20px}
+.bar{width:70%;height:6px;border-radius:9px;background:#2a2c31;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+.camseg{position:absolute;top:10px;right:10px;display:flex;gap:4px}
+.camseg button{padding:5px 10px;font-size:16px;border-radius:9px;background:rgba(15,16,18,.7);border-color:rgba(255,255,255,.12)}
+.camseg button.on{background:var(--accent);color:#1a1712;border-color:var(--accent)}
+.rec{position:absolute;top:12px;left:12px;font-size:16px;font-weight:700;color:#fff;background:var(--live);
+  border-radius:8px;padding:2px 9px;display:none}
+
+/* cards */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-top:12px}
+.card h2{font-size:16px;margin:0 0 10px;color:var(--accent);font-weight:600;letter-spacing:.02em}
+label,.lbl{font-size:16px;color:var(--sub);display:block;margin:10px 0 6px}
+textarea,input[type=text],input[type=password],select{width:100%;font:inherit;font-size:16px;padding:11px 12px;
+  background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:11px;outline:none}
+textarea{min-height:150px;resize:vertical;line-height:1.55}
+textarea:focus,input:focus,select:focus{border-color:var(--accent)}
+button{font:inherit;font-size:16px;cursor:pointer;border-radius:11px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--text);padding:10px 12px}
+button:disabled{opacity:.45}
+.seg{display:flex;gap:6px}.seg button{flex:1;padding:10px 4px}
+.seg button.on{background:var(--accent);color:#1a1712;font-weight:700;border-color:var(--accent)}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+input[type=range]{width:100%;accent-color:var(--accent);height:28px}
+.rv{display:flex;justify-content:space-between;font-size:16px;color:var(--sub)}
+.muted{color:var(--sub);font-size:16px}
+.note{font-size:16px;color:var(--warn);margin-top:8px;white-space:pre-wrap}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.grid button{padding:9px 2px}
+details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
+.hide{display:none!important}
+
+/* dock */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(15,16,18,.94);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  padding:10px 12px calc(10px + var(--sab))}
+.dock .in{max-width:430px;margin:0 auto;display:flex;gap:8px;align-items:center}
+.dock button{height:52px;min-width:52px}
+.dock .play{flex:1;background:var(--accent);color:#1a1712;font-weight:700;border-color:var(--accent);font-size:17px}
+.toast{position:fixed;left:50%;bottom:calc(var(--dock) + var(--sab) + 16px);transform:translateX(-50%);
+  background:#26282d;border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:16px;z-index:40;
+  max-width:400px;width:max-content;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.show{opacity:1}
+</style>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>K-ANCHOR</h1>
+    <span class="badge" id="live"><i></i>LIVE</span>
+    <span class="sp"></span>
+    <a href="../">K-MESH ↗</a>
+  </header>
+
+  <div class="stage" id="stage">
+    <canvas id="cv"></canvas>
+    <div class="rec" id="recBadge">● REC</div>
+    <div class="camseg" id="camSeg">
+      <button data-cam="face">얼굴</button><button data-cam="bust" class="on">바스트</button><button data-cam="full">전신</button>
+    </div>
+    <div class="lower">
+      <div class="tag"><b>FREYA</b><span>AI 아나운서</span></div>
+    </div>
+    <div class="ovl" id="ovl"><div id="ovlTxt">3D 모델 불러오는 중…</div><div class="bar"><i id="ovlBar"></i></div></div>
+  </div>
+  <div class="sub" id="sub"><span class="done"></span><span class="todo">대본을 입력하고 ▶ 읽기를 누르세요.</span></div>
+
+  <div class="card">
+    <h2>대본</h2>
+    <textarea id="script">안녕하십니까. 오늘의 디자인 소식을 전해 드립니다.
+올가을 소재 트렌드는 차분한 무광 질감과 따뜻한 금속 빛입니다. 전문가들은 손끝에 닿는 촉감이 제품의 첫인상을 결정한다고 말합니다.
+정말 흥미로운 변화죠? 지금까지 AI 아나운서 프레야였습니다. 감사합니다.</textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="btnClear">지우기</button>
+      <button id="btnSample">예시 대본</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>목소리</h2>
+    <div class="seg" id="engSeg">
+      <button data-eng="device" class="on">기기 음성</button>
+      <button data-eng="gemini">Gemini 음성</button>
+    </div>
+    <div id="devBox">
+      <label for="voiceSel">한국어 음성</label>
+      <select id="voiceSel"><option value="">불러오는 중…</option></select>
+      <div class="muted" style="margin-top:6px">폰에 설치된 TTS(삼성·구글)를 씁니다. 무료·오프라인이며, 입모양은 글자 분석으로 맞춥니다.</div>
+    </div>
+    <div id="gemBox" class="hide">
+      <label for="gemKey">Gemini API 키</label>
+      <input type="password" id="gemKey" placeholder="AIza…" autocomplete="off">
+      <div class="row">
+        <div><label for="gemVoice">보이스</label>
+          <select id="gemVoice">
+            <option value="Kore">Kore · 단단함</option><option value="Aoede">Aoede · 산뜻함</option>
+            <option value="Leda">Leda · 젊음</option><option value="Callirrhoe">Callirrhoe · 편안함</option>
+            <option value="Despina">Despina · 부드러움</option><option value="Sulafat">Sulafat · 따뜻함</option>
+            <option value="Charon">Charon · 정보 전달(남)</option><option value="Orus">Orus · 단단함(남)</option>
+          </select></div>
+        <div><label for="gemModel">모델</label>
+          <input type="text" id="gemModel" value="gemini-3.8-flash-tts"></div>
+      </div>
+      <label for="gemStyle">말투 지시</label>
+      <input type="text" id="gemStyle" value="Professional Korean TV news anchor. Calm, clear, warm, measured pace.">
+      <div class="muted" style="margin-top:6px">실제 음성 파형을 분석해 턱 움직임을 맞추므로 입모양이 가장 정확합니다. 키는 이 기기에만 저장됩니다.</div>
+    </div>
+    <div class="row" style="margin-top:4px">
+      <div><label>속도 <span id="rateV">1.0</span>×</label><input type="range" id="rate" min="0.7" max="1.4" step="0.05" value="1"></div>
+      <div><label>높낮이 <span id="pitchV">1.0</span></label><input type="range" id="pitch" min="0.7" max="1.3" step="0.05" value="1"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>표정</h2>
+    <div class="lbl" style="margin-top:0">말투 톤</div>
+    <div class="seg" id="toneSeg">
+      <button data-tone="auto" class="on">자동</button><button data-tone="bright">밝게</button>
+      <button data-tone="calm">차분</button><button data-tone="serious">진지</button>
+    </div>
+    <div class="muted" style="margin-top:6px">자동: 문장 내용(감사·축하 / 사고·우려)과 문장부호(? !)에 따라 표정이 바뀝니다.</div>
+    <details style="margin-top:10px"><summary>입모양 · 표정 테스트</summary>
+      <div class="grid" style="margin-top:8px">
+        <button data-v="A">아</button><button data-v="AE">에</button><button data-v="I">이</button><button data-v="O">오</button>
+        <button data-v="U">우</button><button data-v="EU">으</button><button data-v="EO">어</button><button data-v="BMP">음</button>
+        <button data-x="bright">미소</button><button data-x="surprise">놀람</button><button data-x="concern">걱정</button><button data-x="blink">깜박</button>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>녹화</h2>
+    <div class="muted">화면을 영상으로 저장합니다(PPT 삽입용). Gemini 음성은 소리까지 함께 녹화되고, 기기 음성은 브라우저 제한으로 영상만 저장됩니다.</div>
+    <div class="row" style="margin-top:8px"><button id="btnRec">● 녹화하며 읽기</button></div>
+  </div>
+</div>
+
+<div class="dock"><div class="in">
+  <button id="btnStop" aria-label="정지">■</button>
+  <button class="play" id="btnPlay">▶ 읽기</button>
+  <button id="btnPause" aria-label="일시정지">❚❚</button>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, t) => a + (b - a) * t;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('kanchor.' + k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('kanchor.' + k, v); } catch (e) {} }
+};
+let toastT;
+function toast(msg, ms = 2600) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms); }
+
+/* =====================================================================
+   1. KOREAN TEXT → VISEME TIMELINE
+   ===================================================================== */
+const MORPHS = ['jawOpen','mouthWide','mouthPucker','mouthPress','upperLipUp','lowerLipDown','mouthSmileL','mouthSmileR',
+  'mouthFrown','eyeBlinkL','eyeBlinkR','eyeSquint','browUp','browInnerUp','browDown'];
+const VIS = {
+  REST: {},
+  A:   { jawOpen: .70, upperLipUp: .30, lowerLipDown: .28 },
+  AE:  { jawOpen: .44, mouthWide: .45, upperLipUp: .20, lowerLipDown: .15 },
+  EO:  { jawOpen: .52, mouthPucker: .20, lowerLipDown: .14 },
+  O:   { jawOpen: .30, mouthPucker: .72 },
+  U:   { jawOpen: .12, mouthPucker: 1.0 },
+  EU:  { jawOpen: .14, mouthWide: .55, upperLipUp: .06 },
+  I:   { jawOpen: .12, mouthWide: .80, upperLipUp: .14 },
+  BMP: { mouthPress: 1.0 },
+  SJ:  { jawOpen: .07, mouthWide: .34, upperLipUp: .16 },
+  TN:  { jawOpen: .20, mouthWide: .10 },
+  KG:  { jawOpen: .24 },
+  FV:  { jawOpen: .06, lowerLipDown: -.2, upperLipUp: .2, mouthPress: .35 },
+};
+const CHO = ['KG','KG','TN','TN','TN','TN','BMP','BMP','BMP','SJ','SJ',null,'SJ','SJ','SJ','KG','TN','BMP','KG'];
+//            ㄱ   ㄲ   ㄴ   ㄷ   ㄸ   ㄹ   ㅁ    ㅂ    ㅃ    ㅅ   ㅆ   ㅇ   ㅈ   ㅉ   ㅊ   ㅋ   ㅌ   ㅍ    ㅎ
+const JUNG = [['A'],['AE'],['I','A'],['I','AE'],['EO'],['AE'],['I','EO'],['I','AE'],['O'],['O','A'],['O','AE'],['O','AE'],
+  ['I','O'],['U'],['U','EO'],['U','AE'],['U','I'],['I','U'],['EU'],['EU','I'],['I']];
+//  ㅏ ㅐ ㅑ ㅒ ㅓ ㅔ ㅕ ㅖ ㅗ ㅘ ㅙ ㅚ ㅛ ㅜ ㅝ ㅞ ㅟ ㅠ ㅡ ㅢ ㅣ
+const JONG = [null,'KG','KG','KG','TN','TN','TN','TN','TN','KG','BMP','BMP','TN','TN','BMP','TN','BMP','BMP','BMP','TN','TN','KG','TN','TN','KG','TN','BMP','TN'];
+
+const DIG = ['영','일','이','삼','사','오','육','칠','팔','구'];
+function numKo(s) {
+  const [ip, fp] = s.replace(/,/g, '').split('.');
+  const four = n => { // 0..9999
+    let out = ''; const u = ['', '십', '백', '천'];
+    const d = String(n).padStart(4, '0').split('').map(Number);
+    for (let i = 0; i < 4; i++) { const v = d[i], p = 3 - i; if (!v) continue; out += (v === 1 && p > 0 ? '' : DIG[v]) + u[p]; }
+    return out;
+  };
+  let n = BigInt(ip || '0'); let out = '';
+  if (n === 0n) out = '영';
+  const big = ['', '만', '억', '조', '경']; let k = 0;
+  while (n > 0n && k < big.length) { const part = Number(n % 10000n); if (part) out = four(part) + big[k] + out; n /= 10000n; k++; }
+  if (fp) out += '점' + fp.split('').map(c => DIG[+c]).join('');
+  return out;
+}
+const EN_V = { a: 'A', e: 'AE', i: 'I', o: 'O', u: 'U', y: 'I' };
+function enSyllables(word) {
+  const w = word.toLowerCase(); const out = []; let cons = '';
+  for (let i = 0; i < w.length; i++) {
+    const c = w[i];
+    if (EN_V[c]) {
+      let j = i; while (j + 1 < w.length && EN_V[w[j + 1]]) j++;
+      const onset = cons.slice(-1);
+      out.push({ on: /[bmp]/.test(onset) ? 'BMP' : /[fv]/.test(onset) ? 'FV' : /[szcjtdnlr]/.test(onset) ? 'SJ' : onset ? 'KG' : null, v: [EN_V[c]] });
+      cons = ''; i = j;
+    } else cons += c;
+  }
+  if (!out.length) out.push({ on: 'KG', v: ['EU'] });
+  if (cons) out[out.length - 1].coda = /[bmp]/.test(cons) ? 'BMP' : 'TN';
+  return out;
+}
+
+/** Split text into sentences, keep absolute offsets. */
+function splitSentences(text) {
+  const res = []; let st0 = 0;
+  const flush = end => { const raw = text.slice(st0, end); if (raw.trim()) { const lead = raw.length - raw.trimStart().length; res.push({ text: raw.trim(), start: st0 + lead }); } st0 = end; };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\n') { flush(i); st0 = i + 1; continue; }
+    if (/[.!?…。]/.test(c)) {
+      if (c === '.' && /\d/.test(text[i - 1] || '') && /\d/.test(text[i + 1] || '')) continue;   // 3.5
+      let j = i + 1; while (j < text.length && /[.!?…。"'”’)\]]/.test(text[j])) j++;
+      if (j >= text.length || /\s/.test(text[j])) { flush(j); i = j - 1; }
+    }
+  }
+  flush(text.length);
+  return res;
+}
+
+/** Build a timeline of mouth segments for one sentence. D = seconds per syllable. */
+function buildTimeline(sentence, D) {
+  const segs = []; let t = 0; const text = sentence.text, base = sentence.start;
+  const push = (shape, dur, ci, kind = 'v') => { segs.push({ shape, t0: t, t1: t + dur, ci, kind }); t += dur; };
+  const syl = (on, vs, coda, ci, w = 1) => {
+    const d = D * w;
+    if (on) push(on, d * (on === 'BMP' ? .34 : .26), ci, 'c');
+    const vd = d * (on ? .56 : .8);
+    if (vs.length === 2) { push(vs[0], vd * .3, ci); push(vs[1], vd * .7, ci); } else push(vs[0], vd, ci);
+    if (coda) push(coda, d * .24, ci, 'c');
+  };
+  // expand numbers first
+  const re = /(\d[\d,]*(?:\.\d+)?)|([A-Za-z]+)|([\s\S])/g; let m;
+  while ((m = re.exec(text))) {
+    const ci = base + m.index;
+    if (m[1]) { let w = numKo(m[1]); if (text[m.index + m[1].length] === '%') w += '퍼센트'; for (const ch of w) { const c = ch.charCodeAt(0) - 0xAC00; syl(CHO[Math.floor(c / 588)], JUNG[Math.floor((c % 588) / 28)], JONG[c % 28], ci); } continue; }
+    if (m[2]) { for (const s of enSyllables(m[2])) syl(s.on, s.v, s.coda, ci, 1.05); continue; }
+    const ch = m[3]; const code = ch.charCodeAt(0);
+    if (code >= 0xAC00 && code <= 0xD7A3) {
+      const c = code - 0xAC00; syl(CHO[Math.floor(c / 588)], JUNG[Math.floor((c % 588) / 28)], JONG[c % 28], ci);
+    } else if (/[,，;:·]/.test(ch)) push('REST', .26, ci, 'p');
+    else if (/[.!?…。]/.test(ch)) push('REST', .18, ci, 'p');
+    else if (/\s/.test(ch)) push('REST', D * .22, ci, 's');
+    // other symbols: silent
+  }
+  // merge rests at the end
+  while (segs.length && segs[segs.length - 1].kind !== 'v' && segs[segs.length - 1].kind !== 'c') segs.pop();
+  return { segs, dur: segs.length ? segs[segs.length - 1].t1 : 0 };
+}
+
+/** Sample a timeline at time t → morph weights, with coarticulation crossfades. */
+function sampleTimeline(tl, t, out) {
+  for (const k of MORPHS) out[k] = 0;
+  const s = tl.segs; if (!s.length || t < 0 || t > tl.dur + .15) return null;
+  let lo = 0, hi = s.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (s[mid].t1 < t) lo = mid + 1; else hi = mid; }
+  const a = s[lo]; const b = s[lo + 1];
+  const len = a.t1 - a.t0; const f = len > 0 ? (t - a.t0) / len : 1;
+  const blend = b ? clamp((f - .6) / .4) : 0;
+  const wb = blend * blend * (3 - 2 * blend);
+  const A = VIS[a.shape] || VIS.REST, B = b ? (VIS[b.shape] || VIS.REST) : VIS.REST;
+  for (const k in A) out[k] += A[k] * (1 - wb);
+  for (const k in B) out[k] += B[k] * wb;
+  return a;
+}
+
+/* =====================================================================
+   2. EXPRESSION / MOOD
+   ===================================================================== */
+const MOODS = {
+  calm:     { mouthSmileL: .14, mouthSmileR: .14 },
+  bright:   { mouthSmileL: .62, mouthSmileR: .62, eyeSquint: .26, browUp: .14 },
+  serious:  { browDown: .28, browInnerUp: .12, mouthFrown: .08 },
+  concern:  { browInnerUp: .6, mouthFrown: .22, browDown: .05 },
+  surprise: { browUp: .85, jawOpen: .12, browInnerUp: .2 },
+  question: { browUp: .38, browInnerUp: .15, mouthSmileL: .12, mouthSmileR: .12 },
+};
+const POS = /감사|고맙|축하|기쁘|기쁜|좋은|좋아|행복|성공|웃|반갑|즐거|환영|최고|멋진|따뜻|흥미|기대|설레/;
+const NEG = /사고|사망|숨지|부상|피해|화재|우려|안타깝|슬프|슬픈|위기|참사|재난|실종|폭우|지진|침체|하락|논란|경고|위험/;
+function sentenceMood(text, tone) {
+  if (tone === 'bright') return /\?$/.test(text) ? 'question' : 'bright';
+  if (tone === 'calm') return 'calm';
+  if (tone === 'serious') return NEG.test(text) ? 'concern' : 'serious';
+  if (NEG.test(text)) return 'concern';
+  if (/(놀랍|깜짝|충격|세상에|무려)/.test(text) || /!$/.test(text)) return 'surprise';
+  if (/\?$/.test(text)) return 'question';
+  if (POS.test(text)) return 'bright';
+  return 'calm';
+}
+
+/* =====================================================================
+   3. THREE.JS SCENE + AVATAR RIG
+   ===================================================================== */
+const canvas = $('cv'), stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = .92;
+const scene = new THREE.Scene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = .5;
+const key = new THREE.DirectionalLight(0xffe9d6, 1.55); key.position.set(-1.2, 2.4, 2.6); scene.add(key);
+const fill = new THREE.DirectionalLight(0xcfe0ff, .45); fill.position.set(1.8, 1.2, 1.6); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xbfd6ff, 1.6); rim.position.set(.6, 2.2, -2.4); scene.add(rim);
+scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x2a2420, .22));
+const camera = new THREE.PerspectiveCamera(22, 1, .02, 60);
+const controls = new OrbitControls(camera, canvas);
+controls.enablePan = false; controls.enableDamping = true; controls.dampingFactor = .08;
+controls.minDistance = .35; controls.maxDistance = 6; controls.rotateSpeed = .6;
+controls.minPolarAngle = Math.PI * .28; controls.maxPolarAngle = Math.PI * .62;
+const CAMS = {
+  face: { pos: [0, 1.585, .82], target: [0, 1.565, 0], fov: 20 },
+  bust: { pos: [0, 1.47, 1.95], target: [0, 1.40, 0], fov: 22 },
+  full: { pos: [0, 1.05, 5.2], target: [0, .92, 0], fov: 22 },
+};
+let camAnim = null;
+function setCam(name, instant) {
+  const c = CAMS[name]; if (!c) return;
+  const to = { pos: new THREE.Vector3(...c.pos), target: new THREE.Vector3(...c.target), fov: c.fov };
+  if (instant) { camAnim = null; camera.position.copy(to.pos); controls.target.copy(to.target); camera.fov = to.fov; camera.updateProjectionMatrix(); return; }
+  camAnim = { from: { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov }, to, t: 0 };
+}
+setCam('bust', true);
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage); resize();
+
+const avatar = { ready: false, morphMeshes: [], bones: {}, rest: {}, parentQ: {} };
+const sanitize = n => n.replace(/\s/g, '_').replace(/[\[\]\.:\/]/g, '');
+function bone(n) { return avatar.bones[sanitize(n)]; }
+
+const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+loader.load('freya.glb', gltf => {
+  const root = gltf.scene; scene.add(root);
+  root.traverse(o => {
+    if (o.isBone) avatar.bones[o.name] = o;
+    if (!o.isMesh) return;
+    o.frustumCulled = false;
+    const m = o.material;
+    if (o.morphTargetDictionary && Object.keys(o.morphTargetDictionary).length) avatar.morphMeshes.push(o);
+    const n = m.name;
+    if (n === 'Hair' || n === 'Cap') {
+      m.transparent = false; m.alphaTest = .38; m.alphaToCoverage = true; m.depthWrite = true; m.side = THREE.DoubleSide;
+      m.roughness = .62; m.metalness = 0; m.envMapIntensity = .45; if (m.normalScale) m.normalScale.set(.5, .5);
+    } else if (n === 'Eyebrows') {
+      m.transparent = true; m.alphaTest = .02; m.depthWrite = false; o.renderOrder = 1; m.roughness = .7;
+    } else if (n === 'Eyelashes') {
+      m.transparent = false; m.alphaTest = .22; m.alphaToCoverage = true; m.roughness = .6;
+    } else if (n === 'Stockings') { m.transparent = false; m.alphaTest = .5; m.alphaToCoverage = true; }
+    else if (n === 'Glass') { m.transparent = true; m.opacity = .12; m.roughness = .03; m.metalness = 0; m.depthWrite = false; o.renderOrder = 2; }
+    else if (n === 'Body' || n === 'Mouth') { m.envMapIntensity = .6; m.roughness = Math.max(m.roughness, .55); }
+    if (n === 'Eyes') { m.envMapIntensity = 1.2; }
+  });
+  root.updateMatrixWorld(true);
+  for (const name in avatar.bones) {
+    const b = avatar.bones[name];
+    avatar.rest[name] = { q: b.quaternion.clone(), p: b.position.clone() };
+    avatar.parentQ[name] = b.parent ? b.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
+  }
+  const eyeL = bone('DEF-eye.L'); avatar.eyeWorld = eyeL ? eyeL.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 1.6, .06);
+  avatar.ready = true;
+  $('ovl').classList.add('hide');
+  window.__anchorReady = true;
+}, ev => {
+  if (ev.total) { $('ovlBar').style.width = (ev.loaded / ev.total * 100).toFixed(0) + '%'; $('ovlTxt').textContent = `3D 모델 불러오는 중… ${(ev.loaded / 1048576).toFixed(1)} / ${(ev.total / 1048576).toFixed(1)}MB`; }
+}, err => { $('ovlTxt').textContent = '모델을 불러오지 못했습니다: ' + err.message; window.__anchorError = String(err); });
+
+const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3();
+/** Rotate bone by a world-axis euler (x=pitch nod, y=yaw, z=roll) relative to rest. */
+function poseBone(name, x, y, z) {
+  const sn = sanitize(name), b = avatar.bones[sn]; if (!b) return;
+  const P = avatar.parentQ[sn];
+  _q.setFromEuler(_e.set(x, y, z, 'YXZ'));
+  _q2.copy(P).invert().multiply(_q).multiply(P);          // world delta → parent space
+  b.quaternion.copy(_q2).multiply(avatar.rest[sn].q);
+}
+/** Translate bone by a world-space offset (metres) relative to rest. */
+const _iq = new THREE.Quaternion(), _ws = new THREE.Vector3();
+function moveBone(name, dx, dy, dz) {
+  const sn = sanitize(name), b = avatar.bones[sn]; if (!b) return;
+  _v.set(dx, dy, dz).applyQuaternion(_iq.copy(avatar.parentQ[sn]).invert());
+  b.parent.getWorldScale(_ws); _v.divide(_ws);
+  b.position.copy(avatar.rest[sn].p).add(_v);
+}
+/** Rotate a set of sibling bones about a shared pivot (eyes). */
+function poseAboutPivot(names, pivotName, x, y) {
+  const pv = avatar.rest[sanitize(pivotName)]; if (!pv) return;
+  const P = avatar.parentQ[sanitize(pivotName)];
+  _q.setFromEuler(_e.set(x, y, 0, 'YXZ'));
+  _q2.copy(P).invert().multiply(_q).multiply(P);
+  for (const n of names) {
+    const sn = sanitize(n), b = avatar.bones[sn]; if (!b) continue; const r = avatar.rest[sn];
+    _v.copy(r.p).sub(pv.p).applyQuaternion(_q2).add(pv.p); b.position.copy(_v);
+    b.quaternion.copy(_q2).multiply(r.q);
+  }
+}
+
+/* =====================================================================
+   4. ANIMATION STATE
+   ===================================================================== */
+const face = {}; const faceTarget = {}; const vis = {};
+for (const k of MORPHS) { face[k] = 0; faceTarget[k] = 0; vis[k] = 0; }
+const st = {
+  mood: 'calm', moodW: {}, blink: 0, blinkT: 0, nextBlink: 1.5, blinkDur: .16,
+  gaze: { x: 0, y: 0, tx: 0, ty: 0, next: 1 }, head: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 },
+  nod: 0, nodV: 0, browPulse: 0, lastPeak: 0, curSi: -1, test: null, testUntil: 0, speaking: false, lastSeg: null, t: 0,
+};
+for (const k of MORPHS) st.moodW[k] = 0;
+function triggerBlink(d = .15) { if (st.blinkT <= 0) { st.blinkT = d; st.blinkDur = d; } }
+function noise(t, s) { return Math.sin(t * 1.0 + s) * .5 + Math.sin(t * 2.31 + s * 1.7) * .3 + Math.sin(t * 4.13 + s * 2.9) * .2; }
+
+/* =====================================================================
+   5. SPEECH ENGINES
+   ===================================================================== */
+const ui = { eng: store.get('eng', 'device'), tone: store.get('tone', 'auto'), rate: +store.get('rate', 1), pitch: +store.get('pitch', 1) };
+const player = {
+  state: 'idle',            // idle | playing | paused
+  sentences: [], idx: 0,
+  tl: null,                 // current timeline
+  clock: () => -1,          // returns current timeline time (s) or -1
+  gate: null,               // optional (t)=>0..1 audio envelope
+  token: 0,
+};
+let audioCtx = null, recDest = null;
+function ensureAudio() {
+  if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); recDest = audioCtx.createMediaStreamDestination(); }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+/* ---- device TTS (speechSynthesis) ---- */
+const synth = window.speechSynthesis;
+let koVoices = [];
+function loadVoices() {
+  if (!synth) return;
+  const all = synth.getVoices();
+  koVoices = all.filter(v => /^ko/i.test(v.lang) || /korean|한국/i.test(v.name));
+  const sel = $('voiceSel'); const saved = store.get('voice', '');
+  sel.innerHTML = '';
+  if (!koVoices.length) { sel.innerHTML = '<option value="">기본 한국어 음성</option>'; return; }
+  const score = v => (/neural|natural|premium|enhanced/i.test(v.name) ? 3 : 0) + (/samsung|google/i.test(v.name) ? 1 : 0) + (v.localService ? .5 : 0);
+  koVoices.sort((a, b) => score(b) - score(a));
+  for (const v of koVoices) { const o = document.createElement('option'); o.value = v.voiceURI; o.textContent = v.name + (v.localService ? '' : ' · 온라인'); sel.appendChild(o); }
+  if (saved && koVoices.some(v => v.voiceURI === saved)) sel.value = saved;
+}
+if (synth) { loadVoices(); synth.onvoiceschanged = loadVoices; setTimeout(loadVoices, 600); }
+
+const speechK = { k: +store.get('speechK', 1) };  // learned timeline-speed ratio (estimate / actual)
+function syllableD() { return 0.148 / ui.rate; }
+
+function playDeviceSentence(i, tok) {
+  const s = player.sentences[i];
+  const tl = buildTimeline(s, syllableD());
+  player.tl = tl; onSentence(i);
+  if (!synth || player.silentMode) { return playSilentSentence(i, tok, tl); }
+  const u = new SpeechSynthesisUtterance(s.text);
+  u.lang = 'ko-KR'; u.rate = ui.rate; u.pitch = ui.pitch;
+  const v = koVoices.find(v => v.voiceURI === $('voiceSel').value) || koVoices[0]; if (v) u.voice = v;
+  let t0 = 0, corr = 0, started = false, pausedAt = 0;
+  player.clock = () => {
+    if (!started) return -1;
+    const now = player.state === 'paused' ? pausedAt : performance.now();
+    return (now - t0) / 1000 * speechK.k + corr;
+  };
+  player.gate = null;
+  player._pause = () => { pausedAt = performance.now(); synth.pause(); };
+  player._resume = () => { t0 += performance.now() - pausedAt; synth.resume(); };
+  u.onstart = () => { if (tok !== player.token) return; started = true; t0 = performance.now(); };
+  u.onboundary = e => {
+    if (tok !== player.token || !started || e.name === 'sentence') return;
+    const abs = s.start + e.charIndex; const seg = tl.segs.find(g => g.ci >= abs); if (!seg) return;
+    const now = player.clock(); corr += (seg.t0 - now) * .65;
+  };
+  const fin = () => {
+    if (tok !== player.token) return;
+    if (started) {
+      const actual = (performance.now() - t0) / 1000;
+      if (actual > .6 && tl.dur > .5) speechK.k = clamp(speechK.k * .6 + (tl.dur / actual) * .4, .55, 1.8), store.set('speechK', speechK.k.toFixed(3));
+    }
+    player.clock = () => -1; nextSentence(tok);
+  };
+  u.onend = () => {
+    if (tok !== player.token) return;
+    const tooFast = started && tl.dur > .8 && (performance.now() - t0) / 1000 < tl.dur * .2;
+    if (!started || tooFast) { player.silentMode = true; toast('기기 TTS가 응답하지 않아 입모양만 재생합니다.'); return playSilentSentence(i, tok, tl); }
+    fin();
+  };
+  u.onerror = e => {
+    if (tok !== player.token) return; if (e.error === 'interrupted' || e.error === 'canceled') return;
+    player.silentMode = true; toast('음성 오류(' + e.error + ') · 입모양만 재생합니다.'); playSilentSentence(i, tok, tl);
+  };
+  synth.speak(u);
+  // watchdog: some engines never fire onstart
+  setTimeout(() => { if (tok === player.token && !started && player.state === 'playing' && synth.speaking) { started = true; t0 = performance.now(); } }, 1200);
+}
+/* no-TTS fallback: animate on timeline only */
+function playSilentSentence(i, tok, tl) {
+  const t0 = performance.now(); let pausedAt = 0, off = 0;
+  player.clock = () => ((player.state === 'paused' ? pausedAt : performance.now()) - t0 - off) / 1000;
+  player._pause = () => { pausedAt = performance.now(); };
+  player._resume = () => { off += performance.now() - pausedAt; };
+  const tick = () => { if (tok !== player.token) return; if (player.clock() > tl.dur + .2) { player.clock = () => -1; nextSentence(tok); } else setTimeout(tick, 50); };
+  tick();
+}
+
+/* ---- Gemini TTS (audio-driven lips) ---- */
+function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+function findAudioB64(obj) {
+  let best = null;
+  const walk = o => {
+    if (!o || typeof o !== 'object') return;
+    if (typeof o.data === 'string' && o.data.length > 1000) {
+      const mt = (o.mime_type || o.mimeType || o.type || '') + '';
+      if (!best || /audio/.test(mt)) best = { data: o.data, mime: mt };
+    }
+    for (const k in o) walk(o[k]);
+  };
+  walk(obj); return best;
+}
+async function geminiTTS(text, signal) {
+  const keyV = $('gemKey').value.trim(); if (!keyV) throw new Error('Gemini API 키를 입력하세요.');
+  const model = $('gemModel').value.trim() || 'gemini-3.8-flash-tts';
+  const voice = $('gemVoice').value; const style = toneStyle();
+  const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': keyV };
+  let res, j;
+  const legacy = /2\.5/.test(model);
+  if (!legacy) {
+    res = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers, signal, body: JSON.stringify({
+      model, input: [{ type: 'user_input', content: [{ type: 'text', text, annotations: [{ type: 'speech_metadata', style }] }] }],
+      response_format: { type: 'audio' }, generation_config: { speech_config: [{ voice }] } }) });
+  }
+  if (legacy || res.status === 404) {
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers, signal, body: JSON.stringify({
+      contents: [{ parts: [{ text: `${style}\n\n${text}` }] }],
+      generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } } }) });
+  }
+  j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + res.status));
+  const a = findAudioB64(j); if (!a) throw new Error('응답에 음성이 없습니다.');
+  const bytes = b64ToBytes(a.data); const ctx = ensureAudio();
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) return await ctx.decodeAudioData(bytes.buffer.slice(0));
+  const sr = +((a.mime.match(/rate=(\d+)/) || [])[1] || 24000);
+  const n = bytes.length >> 1, buf = ctx.createBuffer(1, n, sr), ch = buf.getChannelData(0), dv = new DataView(bytes.buffer);
+  for (let i = 0; i < n; i++) ch[i] = dv.getInt16(i * 2, true) / 32768;
+  return buf;
+}
+function toneStyle() {
+  const base = $('gemStyle').value.trim() || 'Professional Korean TV news anchor.';
+  const add = { bright: ' Bright, smiling, friendly.', calm: ' Calm and composed.', serious: ' Serious, grave, slow and steady.' }[ui.tone] || '';
+  return base + add;
+}
+
+/** Audio envelope analysis → per-10ms energy, voiced regions. */
+function analyze(buf) {
+  const d = buf.getChannelData(0), sr = buf.sampleRate, hop = Math.round(sr / 100), n = Math.floor(d.length / hop);
+  const env = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let s = 0; for (let j = 0; j < hop; j++) { const x = d[i * hop + j]; s += x * x; } env[i] = Math.sqrt(s / hop); }
+  for (let i = 1; i < n - 1; i++) env[i] = (env[i - 1] + 2 * env[i] + env[i + 1]) / 4;
+  const sorted = Array.from(env).sort((a, b) => a - b);
+  const p95 = sorted[Math.floor(n * .95)] || 1e-4; const thr = p95 * .07;
+  for (let i = 0; i < n; i++) env[i] = env[i] / p95;
+  const voiced = []; let st0 = -1;
+  for (let i = 0; i <= n; i++) {
+    const on = i < n && env[i] > .07;
+    if (on && st0 < 0) st0 = i;
+    if (!on && st0 >= 0) { voiced.push([st0 / 100, i / 100]); st0 = -1; }
+  }
+  const merged = [];
+  for (const r of voiced) { if (merged.length && r[0] - merged[merged.length - 1][1] < .12) merged[merged.length - 1][1] = r[1]; else merged.push(r.slice()); }
+  return { env, thr, dur: buf.duration, voiced: merged.filter(r => r[1] - r[0] > .03) };
+}
+/** Warp a text timeline onto real audio: phrases ↔ voiced regions split by the longest silences. */
+function alignTimeline(tl, an) {
+  const segs = tl.segs; if (!segs.length || !an.voiced.length) return tl;
+  // text phrases split at punctuation pauses
+  const phrases = []; let cur = null;
+  for (const g of segs) {
+    if (g.kind === 'p') { if (cur) { phrases.push(cur); cur = null; } continue; }
+    if (!cur) cur = { a: g.t0, b: g.t1, segs: [] };
+    cur.b = g.t1; cur.segs.push(g);
+  }
+  if (cur) phrases.push(cur);
+  if (!phrases.length) return tl;
+  const V = an.voiced; const gaps = [];
+  for (let i = 1; i < V.length; i++) gaps.push({ i, len: V[i][0] - V[i - 1][1] });
+  const P = phrases.length; let bounds = [];
+  if (P > 1 && gaps.length >= P - 1) bounds = gaps.slice().sort((x, y) => y.len - x.len).slice(0, P - 1).map(g => g.i).sort((a, b) => a - b);
+  const groups = []; let s0 = 0;
+  if (bounds.length === P - 1) { for (const b of bounds) { groups.push([V[s0][0], V[b - 1][1]]); s0 = b; } groups.push([V[s0][0], V[V.length - 1][1]]); }
+  const out = [];
+  const mapRange = (ph, c, d) => { const L = ph.b - ph.a || 1; for (const g of ph.segs) out.push({ ...g, t0: c + (g.t0 - ph.a) / L * (d - c), t1: c + (g.t1 - ph.a) / L * (d - c) }); };
+  if (groups.length === P) phrases.forEach((ph, k) => mapRange(ph, groups[k][0], groups[k][1]));
+  else { // fallback: one span
+    const all = { a: phrases[0].a, b: phrases[P - 1].b, segs: phrases.flatMap(p => p.segs) };
+    mapRange(all, V[0][0], V[V.length - 1][1]);
+  }
+  return { segs: out, dur: an.dur };
+}
+
+function geminiChunks(sentences) {
+  const chunks = []; let cur = null;
+  for (let i = 0; i < sentences.length; i++) {
+    const s = sentences[i];
+    if (!cur || cur.text.length + s.text.length > 220) { cur = { first: i, last: i, text: s.text }; chunks.push(cur); }
+    else { cur.last = i; cur.text += ' ' + s.text; }
+  }
+  return chunks;
+}
+async function playGemini(tok) {
+  const chunks = geminiChunks(player.sentences); const ctrl = new AbortController(); player._abort = ctrl;
+  const fetchChunk = c => c.p || (c.p = geminiTTS(c.text, ctrl.signal));
+  setStatus('음성 생성 중…');
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const c = chunks[ci]; let buf;
+    try { buf = await fetchChunk(c); } catch (e) { if (tok === player.token) { toast('Gemini 오류: ' + e.message, 5000); stopAll(); } return; }
+    if (ci + 1 < chunks.length) fetchChunk(chunks[ci + 1]).catch(() => {});
+    if (tok !== player.token) return;
+    const an = analyze(buf);
+    // concatenate sentence timelines of the chunk (as one virtual sentence)
+    const merged = buildChunkTimeline(c, syllableD());
+    const tl = alignTimeline(merged, an);
+    player.tl = tl; player.idx = c.first; onSentence(c.first, c.last);
+    const ctx = ensureAudio(); const src = ctx.createBufferSource(); src.buffer = buf;
+    src.playbackRate.value = 1; src.connect(ctx.destination); src.connect(recDest);
+    const t0 = ctx.currentTime + .05; src.start(t0); player._src = src;
+    player.clock = () => ctx.currentTime - t0;
+    player.gate = t => { const i = Math.floor(t * 100); return i >= 0 && i < an.env.length ? an.env[i] : 0; };
+    player._pause = () => ctx.suspend(); player._resume = () => ctx.resume();
+    setStatus('방송 중');
+    await new Promise(r => { src.onended = r; player._endChunk = r; });
+    if (tok !== player.token) return;
+  }
+  player.clock = () => -1; finishAll(tok);
+}
+function buildChunkTimeline(c, D) {
+  const segs = []; let off = 0;
+  for (let i = c.first; i <= c.last; i++) {
+    const tl = buildTimeline(player.sentences[i], D);
+    for (const g of tl.segs) segs.push({ ...g, t0: g.t0 + off, t1: g.t1 + off, si: i });
+    off += tl.dur;
+    if (i < c.last) { segs.push({ shape: 'REST', t0: off, t1: off + .45, ci: player.sentences[i + 1].start - 1, kind: 'p', si: i }); off += .45; }
+  }
+  return { segs, dur: off };
+}
+
+/* ---- transport ---- */
+function setStatus(s) { $('live').classList.toggle('on', player.state === 'playing'); $('btnPlay').textContent = player.state === 'playing' ? '◉ ' + (s || '방송 중') : '▶ 읽기'; }
+function onSentence(i, last = i) {
+  const s = player.sentences[i]; st.mood = sentenceMood(s.text, ui.tone); st.curSi = i;
+  st.subText = player.sentences.slice(i, last + 1); triggerBlink(.14); st.nodV -= .9; st.browPulse = .6;
+  if (Math.random() < .5) { st.gaze.tx = (Math.random() - .5) * .08; st.gaze.ty = .09; st.gaze.next = .55; }
+}
+function nextSentence(tok) {
+  if (tok !== player.token || player.state === 'idle') return;
+  player.idx++;
+  if (player.idx >= player.sentences.length) return finishAll(tok);
+  setTimeout(() => { if (tok === player.token && player.state === 'playing') playDeviceSentence(player.idx, tok); }, 140);
+}
+function finishAll(tok) {
+  if (tok !== player.token) return;
+  player.state = 'idle'; player.tl = null; player.clock = () => -1; setStatus();
+  st.mood = ui.tone === 'serious' ? 'serious' : 'bright'; setTimeout(() => { if (player.state === 'idle') st.mood = 'calm'; }, 2600);
+  renderSub(-1, true);
+  if (rec.mr && rec.mr.state === 'recording') setTimeout(() => rec.stop(), 900);
+}
+function startReading(fromIdx = 0) {
+  if (!avatar.ready) return toast('모델을 불러오는 중입니다.');
+  const text = $('script').value.trim(); if (!text) return toast('대본을 입력하세요.');
+  stopAll(true);
+  player.sentences = splitSentences(text); player.idx = fromIdx; player.state = 'playing'; player.silentMode = false; const tok = ++player.token;
+  ensureAudio(); setStatus();
+  if (ui.eng === 'gemini') playGemini(tok);
+  else { if (synth) synth.cancel(); if (!synth || (!koVoices.length && !synth.getVoices().length)) toast('기기 TTS가 없어 입모양만 재생합니다.'); playDeviceSentence(fromIdx, tok); }
+}
+function stopAll(silent) {
+  player.token++; player.state = 'idle'; player.tl = null; player.clock = () => -1; player.gate = null;
+  try { synth && synth.cancel(); } catch (e) {}
+  try { player._src && player._src.stop(); } catch (e) {}
+  try { player._abort && player._abort.abort(); } catch (e) {}
+  if (player._endChunk) player._endChunk();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  setStatus(); if (!silent) { renderSub(-1, true); if (rec.mr && rec.mr.state === 'recording') rec.stop(); }
+}
+function togglePause() {
+  if (player.state === 'playing') { player.state = 'paused'; player._pause && player._pause(); $('btnPause').textContent = '▶'; $('live').classList.remove('on'); $('btnPlay').textContent = '❚❚ 일시정지됨'; }
+  else if (player.state === 'paused') { player.state = 'playing'; player._resume && player._resume(); $('btnPause').textContent = '❚❚'; setStatus(); }
+}
+
+/* ---- subtitles ---- */
+let lastSubKey = '';
+function renderSub(ci, reset) {
+  const done = $('sub').firstElementChild, todo = $('sub').lastElementChild;
+  if (reset) { done.textContent = ''; todo.textContent = player.sentences.length ? '— 방송을 마쳤습니다 —' : '대본을 입력하고 ▶ 읽기를 누르세요.'; lastSubKey = ''; return; }
+  if (!st.subText) return;
+  const full = st.subText.map(s => s.text).join(' ');
+  const startAbs = st.subText[0].start; let cut = 0;
+  if (ci >= 0) { let acc = 0; for (const s of st.subText) { if (ci >= s.start && ci < s.start + s.text.length) { cut = acc + (ci - s.start) + 1; break; } if (ci >= s.start + s.text.length) cut = acc + s.text.length; acc += s.text.length + 1; } }
+  const show = full.length > 70 ? windowText(full, cut) : { a: full.slice(0, cut), b: full.slice(cut) };
+  const keyS = show.a + '|' + show.b; if (keyS === lastSubKey) return; lastSubKey = keyS;
+  done.textContent = show.a; todo.textContent = show.b;
+}
+function windowText(full, cut) { const s = Math.max(0, Math.min(cut - 30, full.length - 70)); const a = full.slice(s, cut), b = full.slice(cut, s + 70); return { a: (s > 0 ? '…' : '') + a, b: b + (s + 70 < full.length ? '…' : '') }; }
+
+/* =====================================================================
+   6. RECORDING
+   ===================================================================== */
+const rec = {
+  mr: null, chunks: [],
+  start() {
+    ensureAudio();
+    const vs = canvas.captureStream(30); const tracks = [...vs.getVideoTracks()];
+    if (ui.eng === 'gemini' && recDest) tracks.push(...recDest.stream.getAudioTracks());
+    const types = ['video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm'];
+    const type = types.find(t => window.MediaRecorder && MediaRecorder.isTypeSupported(t)) || '';
+    try { this.mr = new MediaRecorder(new MediaStream(tracks), type ? { mimeType: type, videoBitsPerSecond: 6e6 } : undefined); }
+    catch (e) { toast('이 브라우저는 녹화를 지원하지 않습니다.'); return false; }
+    this.chunks = []; this.mr.ondataavailable = e => e.data.size && this.chunks.push(e.data);
+    this.mr.onstop = () => {
+      const blob = new Blob(this.chunks, { type: this.mr.mimeType || 'video/webm' }); const ext = /mp4/.test(blob.type) ? 'mp4' : 'webm';
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `k-anchor-${Date.now()}.${ext}`; a.click();
+      $('recBadge').style.display = 'none'; $('btnRec').textContent = '● 녹화하며 읽기'; toast('영상을 저장했습니다 (' + ext + ')');
+    };
+    this.mr.start(250); $('recBadge').style.display = 'block'; $('btnRec').textContent = '■ 녹화 중지';
+    return true;
+  },
+  stop() { if (this.mr && this.mr.state === 'recording') this.mr.stop(); }
+};
+
+/* =====================================================================
+   7. FRAME LOOP
+   ===================================================================== */
+const clockT = new THREE.Clock();
+function update(dt, T) {
+  // --- speech visemes
+  let seg = null; let speakingNow = false;
+  const tt = player.tl ? player.clock() : -1;
+  if (player.tl && tt >= 0) {
+    seg = sampleTimeline(player.tl, tt + .035, vis);
+    if (seg) {
+      speakingNow = seg.kind === 'v' || seg.kind === 'c';
+      if (player.gate) {
+        const g = player.gate(tt + .02); const gg = clamp((g - .05) / .5) ** .7;
+        for (const k of ['jawOpen', 'upperLipUp', 'lowerLipDown', 'mouthWide', 'mouthPucker']) vis[k] *= (.25 + .75 * gg);
+        if (g < .05 && seg.shape !== 'BMP') for (const k of MORPHS) vis[k] *= .15;
+        speakingNow = g > .06;
+        if (g > .75 && st.lastPeak < T - .35) { st.nodV -= 1.2 * (g - .6); st.lastPeak = T; }
+      }
+      if (seg !== st.lastSeg) {
+        if (seg.kind === 'v' && st.lastSeg && st.lastSeg.kind === 's' && Math.random() < .35) st.nodV -= .6 + Math.random() * .6;
+        st.lastSeg = seg; renderSub(seg.ci);
+        if (seg.si !== undefined && seg.si !== st.curSi) { st.curSi = seg.si; st.mood = sentenceMood(player.sentences[seg.si].text, ui.tone); if (seg.si > player.idx) { triggerBlink(.14); st.nodV -= .8; st.browPulse = .6; } }
+      }
+    }
+  } else for (const k of MORPHS) vis[k] = 0;
+  if (st.test && T < st.testUntil) { for (const k of MORPHS) vis[k] = 0; Object.assign(vis, VIS[st.test] || {}); }
+  st.speaking = speakingNow;
+
+  // --- mood layer (slow)
+  const mood = st.testMood && T < st.testMoodUntil ? MOODS[st.testMood] : (MOODS[st.mood] || MOODS.calm);
+  for (const k of MORPHS) st.moodW[k] = lerp(st.moodW[k], mood[k] || 0, 1 - Math.exp(-dt / .35));
+
+  // --- blinking
+  st.nextBlink -= dt;
+  if (st.nextBlink <= 0) { triggerBlink(.13 + Math.random() * .06); st.nextBlink = 2.2 + Math.random() * 3.8; if (Math.random() < .12) setTimeout(() => triggerBlink(.12), 260); }
+  let blink = 0;
+  if (st.blinkT > 0) { st.blinkT -= dt; const p = 1 - st.blinkT / st.blinkDur; blink = p < .4 ? Math.sin(p / .4 * Math.PI / 2) : Math.cos((p - .4) / .6 * Math.PI / 2); blink = clamp(blink); }
+
+  // --- brow emphasis pulse
+  st.browPulse = Math.max(0, st.browPulse - dt * 1.6);
+
+  // --- compose targets
+  for (const k of MORPHS) faceTarget[k] = vis[k] + st.moodW[k];
+  const smileDamp = clamp(1 - (vis.mouthPucker || 0) * .8);
+  faceTarget.mouthSmileL *= smileDamp; faceTarget.mouthSmileR *= smileDamp;
+  faceTarget.browUp += st.browPulse * .28 * (st.mood === 'concern' ? 0 : 1);
+  faceTarget.eyeBlinkL = Math.max(faceTarget.eyeBlinkL, blink) + st.moodW.eyeSquint * .15;
+  faceTarget.eyeBlinkR = Math.max(faceTarget.eyeBlinkR, blink) + st.moodW.eyeSquint * .15;
+  faceTarget.eyeBlinkL += st.gaze.y > 0 ? st.gaze.y * 1.6 : 0; faceTarget.eyeBlinkR += st.gaze.y > 0 ? st.gaze.y * 1.6 : 0;
+  if (st.testX === 'blink' && T < st.testMoodUntil) faceTarget.eyeBlinkL = faceTarget.eyeBlinkR = 1;
+
+  // --- smoothing (fast for mouth, very fast for lids)
+  for (const k of MORPHS) {
+    const tau = k.startsWith('eyeBlink') ? .018 : (k === 'jawOpen' ? .045 : k.startsWith('mouth') || k.endsWith('LipUp') || k.endsWith('LipDown') ? .038 : .12);
+    face[k] = lerp(face[k], faceTarget[k], 1 - Math.exp(-dt / tau));
+  }
+  for (const m of avatar.morphMeshes) {
+    const d = m.morphTargetDictionary, inf = m.morphTargetInfluences;
+    for (const k of MORPHS) { const i = d[k]; if (i !== undefined) inf[i] = clamp(face[k], -.3, 1.15); }
+  }
+
+  // --- head & body (spring nod + idle noise + breathing)
+  st.nodV += (-st.nod * 60 - st.nodV * 11) * dt; st.nod += st.nodV * dt;
+  const talk = st.speaking ? 1 : 0;
+  const hx = noise(T * .35, 1) * .018 + st.nod * .05 + (st.mood === 'question' ? -.02 : 0) + (st.mood === 'concern' ? .03 : 0);
+  const hy = noise(T * .27, 7) * .03 + talk * noise(T * .9, 3) * .012;
+  const hz = noise(T * .22, 4) * .015 + (st.mood === 'question' ? .045 : 0) + (st.mood === 'bright' ? .015 : 0);
+  st.head.x = lerp(st.head.x, hx, 1 - Math.exp(-dt / .18)); st.head.y = lerp(st.head.y, hy, 1 - Math.exp(-dt / .25)); st.head.z = lerp(st.head.z, hz, 1 - Math.exp(-dt / .4));
+  poseBone('DEF-spine.006', st.head.x * .6, st.head.y * .6, st.head.z * .6);
+  poseBone('DEF-spine.005', st.head.x * .4, st.head.y * .4, st.head.z * .4);
+  const br = Math.sin(T * 2 * Math.PI * .23);
+  poseBone('DEF-spine.003', br * .006, 0, 0);
+  poseBone('DEF-spine.004', -br * .004, 0, 0);
+
+  // arms down, relaxed (A-pose → announcer stance)
+  const sway = br * .01;
+  poseBone('DEF-shoulder.L', 0, 0, -.06 + br * .004); poseBone('DEF-shoulder.R', 0, 0, .06 - br * .004);
+  poseBone('DEF-upper_arm.L', .08, 0, -.62 + sway); poseBone('DEF-upper_arm.R', .08, 0, .62 - sway);
+  poseBone('DEF-forearm.L', -.55, -.25, -.12); poseBone('DEF-forearm.R', -.55, .25, .12);
+  poseBone('DEF-hand.L', -.1, 0, .25); poseBone('DEF-hand.R', -.1, 0, -.25);
+
+  // tongue rests lower when the jaw drops (keeps it behind the lower teeth)
+  const tj = clamp(face.jawOpen);
+  moveBone('DEF-tongue', 0, -.0035 * tj, -.002 * tj); moveBone('DEF-tongue.001', 0, -.003 * tj, -.0015 * tj); moveBone('DEF-tongue.002', 0, -.002 * tj, -.001 * tj);
+
+  // --- gaze: hold camera, micro-saccades
+  st.gaze.next -= dt;
+  if (st.gaze.next <= 0) { st.gaze.next = st.speaking ? 1.2 + Math.random() * 2 : .8 + Math.random() * 2.5; st.gaze.tx = (Math.random() - .5) * (st.speaking ? .05 : .12); st.gaze.ty = (Math.random() - .5) * .04; }
+  st.gaze.x = lerp(st.gaze.x, st.gaze.tx, 1 - Math.exp(-dt / .03)); st.gaze.y = lerp(st.gaze.y, st.gaze.ty, 1 - Math.exp(-dt / .03));
+  if (avatar.eyeWorld) {
+    _v.copy(camera.position).sub(avatar.eyeWorld);
+    const yaw = clamp(Math.atan2(_v.x, _v.z) - st.head.y, -.35, .35), pitch = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)) - st.head.x, -.25, .25);
+    const ex = pitch + st.gaze.y, ey = yaw + st.gaze.x;
+    poseAboutPivot(['DEF-eye.L', 'DEF-eye_iris.L', 'DEF-eye_master.L'], 'DEF-eye.L', ex, ey);
+    poseAboutPivot(['DEF-eye.R', 'DEF-eye_iris.R', 'DEF-eye_master.R'], 'DEF-eye.R', ex, ey);
+  }
+}
+
+function loop() {
+  const dt = Math.min(clockT.getDelta(), .05), T = clockT.elapsedTime;
+  if (camAnim) {
+    camAnim.t = Math.min(1, camAnim.t + dt / .9); const e = 1 - Math.pow(1 - camAnim.t, 3);
+    camera.position.lerpVectors(camAnim.from.pos, camAnim.to.pos, e); controls.target.lerpVectors(camAnim.from.target, camAnim.to.target, e);
+    camera.fov = lerp(camAnim.from.fov, camAnim.to.fov, e); camera.updateProjectionMatrix(); if (camAnim.t >= 1) camAnim = null;
+  }
+  controls.update();
+  if (avatar.ready) update(dt, T);
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* =====================================================================
+   8. UI WIRING
+   ===================================================================== */
+function segBind(id, attr, cur, fn) {
+  const el = $(id); const set = v => { el.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset[attr] === v)); fn(v); };
+  el.addEventListener('click', e => { const b = e.target.closest('button'); if (b) set(b.dataset[attr]); }); set(cur);
+}
+segBind('engSeg', 'eng', ui.eng, v => { ui.eng = v; store.set('eng', v); $('devBox').classList.toggle('hide', v !== 'device'); $('gemBox').classList.toggle('hide', v !== 'gemini'); });
+segBind('toneSeg', 'tone', ui.tone, v => { ui.tone = v; store.set('tone', v); if (player.state === 'idle') st.mood = v === 'auto' ? 'calm' : (v === 'serious' ? 'serious' : v); });
+let camInit = true; segBind('camSeg', 'cam', 'bust', v => { setCam(v, camInit); camInit = false; });
+$('gemKey').value = store.get('gemKey', ''); $('gemKey').addEventListener('change', e => store.set('gemKey', e.target.value.trim()));
+$('gemVoice').value = store.get('gemVoice', 'Kore'); $('gemVoice').addEventListener('change', e => store.set('gemVoice', e.target.value));
+$('gemModel').value = store.get('gemModel', 'gemini-3.8-flash-tts'); $('gemModel').addEventListener('change', e => store.set('gemModel', e.target.value.trim()));
+$('gemStyle').value = store.get('gemStyle', $('gemStyle').value); $('gemStyle').addEventListener('change', e => store.set('gemStyle', e.target.value));
+$('voiceSel').addEventListener('change', e => store.set('voice', e.target.value));
+const savedScript = store.get('script', ''); if (savedScript) $('script').value = savedScript;
+$('script').addEventListener('input', e => store.set('script', e.target.value));
+for (const [id, k] of [['rate', 'rate'], ['pitch', 'pitch']]) {
+  const el = $(id); el.value = ui[k]; $(id + 'V').textContent = (+ui[k]).toFixed(2);
+  el.addEventListener('input', () => { ui[k] = +el.value; $(id + 'V').textContent = ui[k].toFixed(2); store.set(k, ui[k]); });
+}
+const SAMPLE = `안녕하십니까. 오늘의 디자인 소식을 전해 드립니다.
+올가을 소재 트렌드는 차분한 무광 질감과 따뜻한 금속 빛입니다. 전문가들은 손끝에 닿는 촉감이 제품의 첫인상을 결정한다고 말합니다.
+정말 흥미로운 변화죠? 지금까지 AI 아나운서 프레야였습니다. 감사합니다.`;
+$('btnSample').onclick = () => { $('script').value = SAMPLE; store.set('script', SAMPLE); };
+$('btnClear').onclick = () => { $('script').value = ''; store.set('script', ''); $('script').focus(); };
+$('btnPlay').onclick = () => { if (player.state === 'paused') togglePause(); else if (player.state === 'idle') startReading(0); };
+$('btnStop').onclick = () => stopAll();
+$('btnPause').onclick = () => togglePause();
+$('btnRec').onclick = () => { if (rec.mr && rec.mr.state === 'recording') { stopAll(); rec.stop(); return; } if (rec.start()) startReading(0); };
+document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { st.test = b.dataset.v; st.testUntil = clockT.elapsedTime + 1.4; });
+document.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+  const x = b.dataset.x; st.testX = x; st.testMoodUntil = clockT.elapsedTime + 1.6;
+  if (x === 'blink') { st.testMood = null; triggerBlink(.16); st.testMoodUntil = clockT.elapsedTime + .01; } else st.testMood = x;
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && player.state === 'playing' && ui.eng === 'device') stopAll(); });
+
+/* test hook (used by automated checks) */
+window.__anchor = { buildTimeline, splitSentences, numKo, sampleTimeline, alignTimeline, sentenceMood, face, st, player, VIS,
+  setTest(v, mood) { st.test = v; st.testUntil = 1e9; st.testMood = mood || null; st.testMoodUntil = mood ? 1e9 : 0; },
+  setCam, startReading, stopAll, camera, scene, avatar };
+</script>
+</body>
+</html>

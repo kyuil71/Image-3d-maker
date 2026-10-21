@@ -61,3 +61,17 @@ RTX 4090급은 대략 2~3배, 여기에 GLB 추출(리메시·텍스처 베이�
 | GET | `/jobs/{id}/glb` | 결과 GLB |
 
 환경변수: `PORT`, `TRELLIS_MODEL`, `KMESH_ORIGINS`(CORS 허용 주소, 기본 `*` — 공개 운영 시 `https://kyuil71.github.io`로 제한 권장).
+
+---
+
+## K-ANCHOR · AI 아나운서 (`/announcer/`)
+
+글을 붙여 넣으면 3D 아나운서(Freya)가 소리 내어 읽으며 입모양·표정·눈깜박임·고개 움직임을 만듭니다. WebGL(three.js) 단일 HTML + `freya.glb`.
+
+- 주소: https://kyuil71.github.io/Image-3d-maker/announcer/
+- **기기 음성**: 폰 내장 한국어 TTS(삼성·구글). 무료. 한글을 초성·중성·종성으로 분해해 입모양(아·에·이·오·우·으·어, ㅁㅂㅍ 입술 닫힘 등) 타임라인을 만들고, 단어 경계 이벤트와 문장 길이 학습으로 속도를 맞춥니다.
+- **Gemini 음성**: Gemini TTS(`gemini-3.8-flash-tts`, Interactions API)로 사람 같은 음성을 생성하고, 실제 파형의 크기와 무음 구간을 분석해 턱 움직임과 문장 타이밍을 맞춥니다. API 키는 브라우저 localStorage에만 저장됩니다.
+- 표정: 문장 내용(감사·축하 / 사고·우려)과 문장부호(? !)로 자동 전환, 또는 밝게·차분·진지 고정.
+- 녹화: 화면을 mp4/webm으로 저장(Gemini 음성은 소리 포함).
+
+모델: 원본 `Freya.blend`의 Rigify 얼굴 컨트롤로 만든 15개 표정(턱 벌림·입 넓힘·오므림·입술 닫힘·미소 좌우·눈 감기 좌우·눈썹 등)을 셰이프키로 구워 GLB 모프 타깃으로 내보냈습니다(meshopt 압축, 약 4.9MB).
