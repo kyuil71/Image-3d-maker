@@ -115,7 +115,7 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
     <canvas id="cv"></canvas>
     <div class="rec" id="recBadge">● REC</div>
     <div class="camseg" id="camSeg">
-      <button data-cam="face">얼굴</button><button data-cam="bust" class="on">바스트</button><button data-cam="full">전신</button>
+      <button data-cam="face" class="on">얼굴</button><button data-cam="bust">바스트</button><button data-cam="full">전신</button>
     </div>
     <div class="lower">
       <div class="tag"><b id="tagName">HANA</b><span>AI 아나운서</span></div>
@@ -403,14 +403,14 @@ function camPreset(name) {
     full: { pos: [0, 1.05, 5.2], target: [0, .92, 0], fov: 22 },
   }[name];
 }
-let camAnim = null, camName = 'bust';
+let camAnim = null, camName = 'face';
 function setCam(name, instant) {
   const c = camPreset(name); if (!c) return; camName = name;
   const to = { pos: new THREE.Vector3(...c.pos), target: new THREE.Vector3(...c.target), fov: c.fov };
   if (instant) { camAnim = null; camera.position.copy(to.pos); controls.target.copy(to.target); camera.fov = to.fov; camera.updateProjectionMatrix(); return; }
   camAnim = { from: { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov }, to, t: 0 };
 }
-setCam('bust', true);
+setCam('face', true);
 
 function resize() {
   const w = stage.clientWidth, h = stage.clientHeight;
@@ -988,7 +988,7 @@ function segBind(id, attr, cur, fn) {
 }
 segBind('engSeg', 'eng', ui.eng, v => { ui.eng = v; store.set('eng', v); $('devBox').classList.toggle('hide', v !== 'device'); $('gemBox').classList.toggle('hide', v !== 'gemini'); });
 segBind('toneSeg', 'tone', ui.tone, v => { ui.tone = v; store.set('tone', v); if (player.state === 'idle') st.mood = v === 'auto' ? 'calm' : (v === 'serious' ? 'serious' : v); });
-let camInit = true; segBind('camSeg', 'cam', 'bust', v => { setCam(v, camInit); camInit = false; });
+let camInit = true; segBind('camSeg', 'cam', 'face', v => { setCam(v, camInit); camInit = false; });
 $('avSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) selectAvatar(b.dataset.av); });
 selectAvatar('hana');
 $('gemKey').value = store.get('gemKey', ''); $('gemKey').addEventListener('change', e => store.set('gemKey', e.target.value.trim()));
