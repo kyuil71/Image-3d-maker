@@ -118,17 +118,25 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
       <button data-cam="face">얼굴</button><button data-cam="bust" class="on">바스트</button><button data-cam="full">전신</button>
     </div>
     <div class="lower">
-      <div class="tag"><b>FREYA</b><span>AI 아나운서</span></div>
+      <div class="tag"><b id="tagName">HANA</b><span>AI 아나운서</span></div>
     </div>
     <div class="ovl" id="ovl"><div id="ovlTxt">3D 모델 불러오는 중…</div><div class="bar"><i id="ovlBar"></i></div></div>
   </div>
   <div class="sub" id="sub"><span class="done"></span><span class="todo">대본을 입력하고 ▶ 읽기를 누르세요.</span></div>
 
   <div class="card">
+    <h2>아나운서</h2>
+    <div class="seg" id="avSeg">
+      <button data-av="hana" class="on">하나 · HANA</button>
+      <button data-av="freya">프레야 · FREYA</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>대본</h2>
     <textarea id="script">안녕하십니까. 오늘의 디자인 소식을 전해 드립니다.
 올가을 소재 트렌드는 차분한 무광 질감과 따뜻한 금속 빛입니다. 전문가들은 손끝에 닿는 촉감이 제품의 첫인상을 결정한다고 말합니다.
-정말 흥미로운 변화죠? 지금까지 AI 아나운서 프레야였습니다. 감사합니다.</textarea>
+정말 흥미로운 변화죠? 지금까지 AI 아나운서였습니다. 감사합니다.</textarea>
     <div class="row" style="margin-top:8px">
       <button id="btnClear">지우기</button>
       <button id="btnSample">예시 대본</button>
@@ -386,14 +394,18 @@ const controls = new OrbitControls(camera, canvas);
 controls.enablePan = false; controls.enableDamping = true; controls.dampingFactor = .08;
 controls.minDistance = .35; controls.maxDistance = 6; controls.rotateSpeed = .6;
 controls.minPolarAngle = Math.PI * .28; controls.maxPolarAngle = Math.PI * .62;
-const CAMS = {
-  face: { pos: [0, 1.585, .82], target: [0, 1.565, 0], fov: 20 },
-  bust: { pos: [0, 1.47, 1.95], target: [0, 1.40, 0], fov: 22 },
-  full: { pos: [0, 1.05, 5.2], target: [0, .92, 0], fov: 22 },
-};
-let camAnim = null;
+let eyeRef = { y: 1.6, z: .065 };      // set from the active avatar's eye position
+function camPreset(name) {
+  const y = eyeRef.y, z = eyeRef.z;
+  return {
+    face: { pos: [0, y - .014, z + .76], target: [0, y - .034, z - .06], fov: 20 },
+    bust: { pos: [0, y - .11, z + 1.89], target: [0, y - .18, z - .06], fov: 22 },
+    full: { pos: [0, 1.05, 5.2], target: [0, .92, 0], fov: 22 },
+  }[name];
+}
+let camAnim = null, camName = 'bust';
 function setCam(name, instant) {
-  const c = CAMS[name]; if (!c) return;
+  const c = camPreset(name); if (!c) return; camName = name;
   const to = { pos: new THREE.Vector3(...c.pos), target: new THREE.Vector3(...c.target), fov: c.fov };
   if (instant) { camAnim = null; camera.position.copy(to.pos); controls.target.copy(to.target); camera.fov = to.fov; camera.updateProjectionMatrix(); return; }
   camAnim = { from: { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov }, to, t: 0 };
@@ -406,31 +418,77 @@ function resize() {
 }
 new ResizeObserver(resize).observe(stage); resize();
 
-const avatar = { ready: false, morphMeshes: [], bones: {}, rest: {}, parentQ: {} };
+/* Per-character rig description. Bone names are Blender names (dots are stripped by GLTFLoader). */
+const AVATARS = {
+  hana: {
+    name: 'HANA', file: 'hana.glb',
+    head: [['head.x', 1]], neck: [['neck.x', .35]], chest: [['spine_04.x', .006], ['spine_03.x', -.004]],
+    eyes: [{ bones: ['c_eye.l'], pivot: 'c_eye.l' }, { bones: ['c_eye.r'], pivot: 'c_eye.r' }],
+    tongue: ['tong_01.x', 'tong_02.x', 'tong_03.x'], arms: null,
+  },
+  freya: {
+    name: 'FREYA', file: 'freya.glb',
+    head: [['DEF-spine.006', .6]], neck: [['DEF-spine.005', .4]], chest: [['DEF-spine.003', .006], ['DEF-spine.004', -.004]],
+    eyes: [{ bones: ['DEF-eye.L', 'DEF-eye_iris.L', 'DEF-eye_master.L'], pivot: 'DEF-eye.L' },
+           { bones: ['DEF-eye.R', 'DEF-eye_iris.R', 'DEF-eye_master.R'], pivot: 'DEF-eye.R' }],
+    tongue: ['DEF-tongue', 'DEF-tongue.001', 'DEF-tongue.002'], arms: 'freya',
+  },
+};
+const loaded = {};               // id -> avatar runtime
+let avatar = { ready: false, morphMeshes: [], bones: {}, rest: {}, parentQ: {}, cfg: AVATARS.hana };
+let curId = null;
 const sanitize = n => n.replace(/\s/g, '_').replace(/[\[\]\.:\/]/g, '');
 function bone(n) { return avatar.bones[sanitize(n)]; }
 
 const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-loader.load('freya.glb', gltf => {
-  const root = gltf.scene; scene.add(root);
+function tuneMaterial(o, m) {
+  const n = m.name;
+  if (n === 'Hair' || n === 'Cap' || n === 'hair') {
+    m.transparent = false; m.alphaTest = n === 'hair' ? .3 : .38; m.alphaToCoverage = true; m.depthWrite = true; m.side = THREE.DoubleSide;
+    m.roughness = .62; m.metalness = 0; m.envMapIntensity = .45; if (m.normalScale) m.normalScale.set(.5, .5);
+  } else if (n === 'Eyebrows') {
+    m.transparent = true; m.alphaTest = .02; m.depthWrite = false; o.renderOrder = 1; m.roughness = .7;
+  } else if (n === 'Eyelashes') {
+    m.transparent = false; m.alphaTest = .22; m.alphaToCoverage = true; m.roughness = .6;
+  } else if (n === 'Stockings') { m.transparent = false; m.alphaTest = .5; m.alphaToCoverage = true; }
+  else if (n === 'Glass') { m.transparent = true; m.opacity = .12; m.roughness = .03; m.metalness = 0; m.depthWrite = false; o.renderOrder = 2; }
+  else if (n === 'Body' || n === 'Mouth' || n === 'body') { m.envMapIntensity = .6; m.roughness = Math.max(m.roughness, .55); }
+  else if (n === 'eyes') { m.roughness = .12; m.envMapIntensity = 1.1; }
+  else if (n === 'teeth' || n === 'teeth.001') { m.roughness = Math.max(m.roughness, .4); m.envMapIntensity = .5; }
+  if (n === 'Eyes') { m.envMapIntensity = 1.2; }
+}
+function selectAvatar(id) {
+  if (id === curId) return;
+  if (player.state !== 'idle') stopAll();
+  curId = id; const cfg = AVATARS[id];
+  document.querySelectorAll('#avSeg button').forEach(b => b.classList.toggle('on', b.dataset.av === id));
+  $('tagName').textContent = cfg.name;
+  for (const k in loaded) if (loaded[k].root) loaded[k].root.visible = k === id;
+  if (loaded[id] && loaded[id].ready) { activate(loaded[id]); return; }
+  if (loaded[id]) return;               // still loading
+  const av = loaded[id] = { ready: false, morphMeshes: [], bones: {}, rest: {}, parentQ: {}, cfg, root: null };
+  avatar = { ready: false, morphMeshes: [], bones: {}, rest: {}, parentQ: {}, cfg };   // placeholder until loaded
+  $('ovl').classList.remove('hide'); $('ovlBar').style.width = '0%'; $('ovlTxt').textContent = `${cfg.name} 불러오는 중…`;
+  loader.load(cfg.file, gltf => onLoaded(av, gltf), ev => {
+    if (curId !== id) return;
+    if (ev.total) { $('ovlBar').style.width = (ev.loaded / ev.total * 100).toFixed(0) + '%'; $('ovlTxt').textContent = `${cfg.name} 불러오는 중… ${(ev.loaded / 1048576).toFixed(1)} / ${(ev.total / 1048576).toFixed(1)}MB`; }
+  }, err => { delete loaded[id]; $('ovlTxt').textContent = '모델을 불러오지 못했습니다: ' + err.message; window.__anchorError = String(err); });
+}
+function activate(av) {
+  avatar = av; resetFace();
+  eyeRef = { y: av.eyeWorld.y, z: av.eyeWorld.z };
+  setCam(camName, true);
+  $('ovl').classList.add('hide');
+  window.__anchorReady = true;
+}
+function onLoaded(avatar, gltf) {
+  const root = avatar.root = gltf.scene; scene.add(root); root.visible = curId === Object.keys(loaded).find(k => loaded[k] === avatar);
   root.traverse(o => {
     if (o.isBone) avatar.bones[o.name] = o;
     if (!o.isMesh) return;
     o.frustumCulled = false;
-    const m = o.material;
     if (o.morphTargetDictionary && Object.keys(o.morphTargetDictionary).length) avatar.morphMeshes.push(o);
-    const n = m.name;
-    if (n === 'Hair' || n === 'Cap') {
-      m.transparent = false; m.alphaTest = .38; m.alphaToCoverage = true; m.depthWrite = true; m.side = THREE.DoubleSide;
-      m.roughness = .62; m.metalness = 0; m.envMapIntensity = .45; if (m.normalScale) m.normalScale.set(.5, .5);
-    } else if (n === 'Eyebrows') {
-      m.transparent = true; m.alphaTest = .02; m.depthWrite = false; o.renderOrder = 1; m.roughness = .7;
-    } else if (n === 'Eyelashes') {
-      m.transparent = false; m.alphaTest = .22; m.alphaToCoverage = true; m.roughness = .6;
-    } else if (n === 'Stockings') { m.transparent = false; m.alphaTest = .5; m.alphaToCoverage = true; }
-    else if (n === 'Glass') { m.transparent = true; m.opacity = .12; m.roughness = .03; m.metalness = 0; m.depthWrite = false; o.renderOrder = 2; }
-    else if (n === 'Body' || n === 'Mouth') { m.envMapIntensity = .6; m.roughness = Math.max(m.roughness, .55); }
-    if (n === 'Eyes') { m.envMapIntensity = 1.2; }
+    tuneMaterial(o, o.material);
   });
   root.updateMatrixWorld(true);
   for (const name in avatar.bones) {
@@ -438,13 +496,11 @@ loader.load('freya.glb', gltf => {
     avatar.rest[name] = { q: b.quaternion.clone(), p: b.position.clone() };
     avatar.parentQ[name] = b.parent ? b.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
   }
-  const eyeL = bone('DEF-eye.L'); avatar.eyeWorld = eyeL ? eyeL.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 1.6, .06);
+  const eL = avatar.bones[sanitize(avatar.cfg.eyes[0].pivot)], eR = avatar.bones[sanitize(avatar.cfg.eyes[1].pivot)];
+  avatar.eyeWorld = eL && eR ? eL.getWorldPosition(new THREE.Vector3()).add(eR.getWorldPosition(new THREE.Vector3())).multiplyScalar(.5) : new THREE.Vector3(0, 1.6, .06);
   avatar.ready = true;
-  $('ovl').classList.add('hide');
-  window.__anchorReady = true;
-}, ev => {
-  if (ev.total) { $('ovlBar').style.width = (ev.loaded / ev.total * 100).toFixed(0) + '%'; $('ovlTxt').textContent = `3D 모델 불러오는 중… ${(ev.loaded / 1048576).toFixed(1)} / ${(ev.total / 1048576).toFixed(1)}MB`; }
-}, err => { $('ovlTxt').textContent = '모델을 불러오지 못했습니다: ' + err.message; window.__anchorError = String(err); });
+  if (avatar.root.visible) activate(avatar);
+}
 
 const _q = new THREE.Quaternion(), _q2 = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3();
 /** Rotate bone by a world-axis euler (x=pitch nod, y=yaw, z=roll) relative to rest. */
@@ -481,6 +537,7 @@ function poseAboutPivot(names, pivotName, x, y) {
    ===================================================================== */
 const face = {}; const faceTarget = {}; const vis = {};
 for (const k of MORPHS) { face[k] = 0; faceTarget[k] = 0; vis[k] = 0; }
+function resetFace() { for (const k of MORPHS) { face[k] = 0; faceTarget[k] = 0; } }
 const st = {
   mood: 'calm', moodW: {}, blink: 0, blinkT: 0, nextBlink: 1.5, blinkDur: .16,
   gaze: { x: 0, y: 0, tx: 0, ty: 0, next: 1 }, head: { x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 },
@@ -876,22 +933,25 @@ function update(dt, T) {
   const hy = noise(T * .27, 7) * .03 + talk * noise(T * .9, 3) * .012;
   const hz = noise(T * .22, 4) * .015 + (st.mood === 'question' ? .045 : 0) + (st.mood === 'bright' ? .015 : 0);
   st.head.x = lerp(st.head.x, hx, 1 - Math.exp(-dt / .18)); st.head.y = lerp(st.head.y, hy, 1 - Math.exp(-dt / .25)); st.head.z = lerp(st.head.z, hz, 1 - Math.exp(-dt / .4));
-  poseBone('DEF-spine.006', st.head.x * .6, st.head.y * .6, st.head.z * .6);
-  poseBone('DEF-spine.005', st.head.x * .4, st.head.y * .4, st.head.z * .4);
+  const cfg = avatar.cfg;
+  for (const [b, w] of cfg.head) poseBone(b, st.head.x * w, st.head.y * w, st.head.z * w);
+  for (const [b, w] of cfg.neck) poseBone(b, st.head.x * w, st.head.y * w, st.head.z * w);
   const br = Math.sin(T * 2 * Math.PI * .23);
-  poseBone('DEF-spine.003', br * .006, 0, 0);
-  poseBone('DEF-spine.004', -br * .004, 0, 0);
+  for (const [b, a] of cfg.chest) poseBone(b, br * a, 0, 0);
 
   // arms down, relaxed (A-pose → announcer stance)
   const sway = br * .01;
+  if (cfg.arms === 'freya') {
   poseBone('DEF-shoulder.L', 0, 0, -.06 + br * .004); poseBone('DEF-shoulder.R', 0, 0, .06 - br * .004);
   poseBone('DEF-upper_arm.L', .08, 0, -.62 + sway); poseBone('DEF-upper_arm.R', .08, 0, .62 - sway);
   poseBone('DEF-forearm.L', -.55, -.25, -.12); poseBone('DEF-forearm.R', -.55, .25, .12);
   poseBone('DEF-hand.L', -.1, 0, .25); poseBone('DEF-hand.R', -.1, 0, -.25);
+  }
 
   // tongue rests lower when the jaw drops (keeps it behind the lower teeth)
   const tj = clamp(face.jawOpen);
-  moveBone('DEF-tongue', 0, -.0035 * tj, -.002 * tj); moveBone('DEF-tongue.001', 0, -.003 * tj, -.0015 * tj); moveBone('DEF-tongue.002', 0, -.002 * tj, -.001 * tj);
+  const [t0b, t1b, t2b] = cfg.tongue;
+  moveBone(t0b, 0, -.0035 * tj, -.002 * tj); moveBone(t1b, 0, -.003 * tj, -.0015 * tj); moveBone(t2b, 0, -.002 * tj, -.001 * tj);
 
   // --- gaze: hold camera, micro-saccades
   st.gaze.next -= dt;
@@ -901,8 +961,7 @@ function update(dt, T) {
     _v.copy(camera.position).sub(avatar.eyeWorld);
     const yaw = clamp(Math.atan2(_v.x, _v.z) - st.head.y, -.35, .35), pitch = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)) - st.head.x, -.25, .25);
     const ex = pitch + st.gaze.y, ey = yaw + st.gaze.x;
-    poseAboutPivot(['DEF-eye.L', 'DEF-eye_iris.L', 'DEF-eye_master.L'], 'DEF-eye.L', ex, ey);
-    poseAboutPivot(['DEF-eye.R', 'DEF-eye_iris.R', 'DEF-eye_master.R'], 'DEF-eye.R', ex, ey);
+    for (const e of cfg.eyes) poseAboutPivot(e.bones, e.pivot, ex, ey);
   }
 }
 
@@ -930,6 +989,8 @@ function segBind(id, attr, cur, fn) {
 segBind('engSeg', 'eng', ui.eng, v => { ui.eng = v; store.set('eng', v); $('devBox').classList.toggle('hide', v !== 'device'); $('gemBox').classList.toggle('hide', v !== 'gemini'); });
 segBind('toneSeg', 'tone', ui.tone, v => { ui.tone = v; store.set('tone', v); if (player.state === 'idle') st.mood = v === 'auto' ? 'calm' : (v === 'serious' ? 'serious' : v); });
 let camInit = true; segBind('camSeg', 'cam', 'bust', v => { setCam(v, camInit); camInit = false; });
+$('avSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) selectAvatar(b.dataset.av); });
+selectAvatar('hana');
 $('gemKey').value = store.get('gemKey', ''); $('gemKey').addEventListener('change', e => store.set('gemKey', e.target.value.trim()));
 $('gemVoice').value = store.get('gemVoice', 'Kore'); $('gemVoice').addEventListener('change', e => store.set('gemVoice', e.target.value));
 $('gemModel').value = store.get('gemModel', 'gemini-3.8-flash-tts'); $('gemModel').addEventListener('change', e => store.set('gemModel', e.target.value.trim()));
@@ -943,7 +1004,7 @@ for (const [id, k] of [['rate', 'rate'], ['pitch', 'pitch']]) {
 }
 const SAMPLE = `안녕하십니까. 오늘의 디자인 소식을 전해 드립니다.
 올가을 소재 트렌드는 차분한 무광 질감과 따뜻한 금속 빛입니다. 전문가들은 손끝에 닿는 촉감이 제품의 첫인상을 결정한다고 말합니다.
-정말 흥미로운 변화죠? 지금까지 AI 아나운서 프레야였습니다. 감사합니다.`;
+정말 흥미로운 변화죠? 지금까지 AI 아나운서였습니다. 감사합니다.`;
 $('btnSample').onclick = () => { $('script').value = SAMPLE; store.set('script', SAMPLE); };
 $('btnClear').onclick = () => { $('script').value = ''; store.set('script', ''); $('script').focus(); };
 $('btnPlay').onclick = () => { if (player.state === 'paused') togglePause(); else if (player.state === 'idle') startReading(0); };
@@ -960,7 +1021,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && pla
 /* test hook (used by automated checks) */
 window.__anchor = { buildTimeline, splitSentences, numKo, sampleTimeline, alignTimeline, sentenceMood, face, st, player, VIS,
   setTest(v, mood) { st.test = v; st.testUntil = 1e9; st.testMood = mood || null; st.testMoodUntil = mood ? 1e9 : 0; },
-  setCam, startReading, stopAll, camera, scene, avatar };
+  setCam, startReading, stopAll, camera, scene, selectAvatar, get avatar() { return avatar; } };
 </script>
 </body>
 </html>
