@@ -1109,7 +1109,9 @@ function update(dt, T) {
   faceTarget.browUp += st.browPulse * .28 * (st.mood === 'concern' ? 0 : 1);
   faceTarget.eyeBlinkL = (blink > .01 ? Math.max(faceTarget.eyeBlinkL, blink) : faceTarget.eyeBlinkL) + st.moodW.eyeSquint * .15;
   faceTarget.eyeBlinkR = (blink > .01 ? Math.max(faceTarget.eyeBlinkR, blink) : faceTarget.eyeBlinkR) + st.moodW.eyeSquint * .15;
-  const lid = (st.gaze.y > 0 ? st.gaze.y * 1.6 : 0) + Math.max(0, ctl.cur.ex) * 1.1;
+  // upper lids follow the overall gaze: they drop when she looks down (head + eyes), lift a little when she looks up
+  const gp = ctl.cur.hx + ctl.cur.ex;
+  const lid = (st.gaze.y > 0 ? st.gaze.y * 1.6 : 0) + (gp > 0 ? Math.min(.55, gp * 1.05) : Math.max(-.18, gp * .45));
   faceTarget.eyeBlinkL += lid; faceTarget.eyeBlinkR += lid;
   if (st.testX === 'blink' && T < st.testMoodUntil) faceTarget.eyeBlinkL = faceTarget.eyeBlinkR = 1;
 
