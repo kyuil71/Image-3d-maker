@@ -205,6 +205,22 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
   </div>
 
   <div class="card">
+    <h2>의상 재질</h2>
+    <div class="seg" id="clothSeg">
+      <button data-cloth="orig" class="on">원래 재질</button><button data-cloth="vinyl">비닐</button>
+    </div>
+    <div id="vinylBox" class="hide">
+      <div class="lbl">비닐 색상</div>
+      <div class="seg" id="vinylColor">
+        <button data-vc="#101114" class="on">블랙</button><button data-vc="#e9e7e2">화이트</button>
+        <button data-vc="#b0171f">레드</button><button data-vc="#1d2b4f">네이비</button>
+      </div>
+      <label>광택 <span id="glossV">90</span>%</label><input type="range" id="gloss" min="40" max="100" step="5" value="90">
+    </div>
+    <div class="muted" style="margin-top:6px">상의·하의 등 겉옷에 매끈한 PVC 비닐 마감을 입힙니다(불투명). 주름은 원래 노멀맵을 그대로 씁니다.</div>
+  </div>
+
+  <div class="card">
     <h2>녹화</h2>
     <div class="muted">화면을 영상으로 저장합니다(PPT 삽입용). Gemini 음성은 소리까지 함께 녹화되고, 기기 음성은 브라우저 제한으로 영상만 저장됩니다.</div>
     <div class="row" style="margin-top:8px"><button id="btnRec">● 녹화하며 읽기</button></div>
@@ -572,8 +588,30 @@ function selectAvatar(id) {
     if (ev.total) { $('ovlBar').style.width = (ev.loaded / ev.total * 100).toFixed(0) + '%'; $('ovlTxt').textContent = `${cfg.name} 불러오는 중… ${(ev.loaded / 1048576).toFixed(1)} / ${(ev.total / 1048576).toFixed(1)}MB`; }
   }, err => { delete loaded[id]; $('ovlTxt').textContent = '모델을 불러오지 못했습니다: ' + err.message; window.__anchorError = String(err); });
 }
+/* ---- clothing material swap (opaque glossy vinyl) ---- */
+const CLOTH_MATS = ['shirt', 'jean', 'Top', 'skirt', 'Under'];
+const cloth = { mode: 'orig', color: '#101114', gloss: .9 };
+function applyCloth(av) {
+  if (!av || !av.root) return;
+  av.root.traverse(o => {
+    if (!o.isMesh) return;
+    const orig = o.userData.origMat || o.material;
+    if (!CLOTH_MATS.includes(orig.name)) return;
+    o.userData.origMat = orig;
+    if (cloth.mode === 'orig') { o.material = orig; return; }
+    let v = o.userData.vinylMat;
+    if (!v) {
+      v = o.userData.vinylMat = new THREE.MeshPhysicalMaterial({ name: orig.name + '_vinyl', normalMap: orig.normalMap || null,
+        metalness: 0, clearcoat: 1, side: orig.side, transparent: false, opacity: 1 });
+      if (orig.normalMap) v.normalScale.copy(orig.normalScale).multiplyScalar(.6);
+    }
+    v.color.set(cloth.color); v.roughness = lerp(.45, .06, (cloth.gloss - .4) / .6); v.clearcoatRoughness = lerp(.3, .02, (cloth.gloss - .4) / .6);
+    v.envMapIntensity = 1.3; v.specularIntensity = 1; v.needsUpdate = true;
+    o.material = v;
+  });
+}
 function activate(av) {
-  avatar = av; resetFace(); if (av.pose) { av.pose.y = 0; }
+  avatar = av; resetFace(); applyCloth(av); if (av.pose) { av.pose.y = 0; }
   eyeRef = { y: av.eyeWorld.y, z: av.eyeWorld.z };
   setCam(camName, true);
   $('ovl').classList.add('hide');
@@ -1174,6 +1212,9 @@ function segBind(id, attr, cur, fn) {
   el.addEventListener('click', e => { const b = e.target.closest('button'); if (b) set(b.dataset[attr]); }); set(cur);
 }
 segBind('engSeg', 'eng', ui.eng, v => { ui.eng = v; store.set('eng', v); $('devBox').classList.toggle('hide', v !== 'device'); $('gemBox').classList.toggle('hide', v !== 'gemini'); });
+segBind('clothSeg', 'cloth', 'orig', v => { cloth.mode = v; $('vinylBox').classList.toggle('hide', v !== 'vinyl'); applyCloth(avatar); });
+segBind('vinylColor', 'vc', '#101114', v => { cloth.color = v; applyCloth(avatar); });
+$('gloss').addEventListener('input', e => { cloth.gloss = +e.target.value / 100; $('glossV').textContent = e.target.value; applyCloth(avatar); });
 segBind('toneSeg', 'tone', ui.tone, v => { ui.tone = v; store.set('tone', v); if (player.state === 'idle') st.mood = v === 'auto' ? 'calm' : (v === 'serious' ? 'serious' : v); });
 let camInit = true; segBind('camSeg', 'cam', 'face', v => { setCam(v, camInit); camInit = false; });
 // pose menu: compact sheet above the dock; page scrolls so the stage stays fully visible
