@@ -90,15 +90,6 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
 .dock .in{max-width:430px;margin:0 auto;display:flex;gap:8px;align-items:center}
 .dock button{height:52px;min-width:52px}
 .dock .play{flex:1;background:var(--accent);color:#1a1712;font-weight:700;border-color:var(--accent);font-size:17px}
-.posePanel{position:fixed;left:0;right:0;bottom:calc(var(--dock) + var(--sab));z-index:35;max-width:430px;margin:0 auto;
-  background:rgba(23,24,27,.97);border:1px solid var(--line);border-bottom:none;border-radius:16px 16px 0 0;
-  padding:8px 10px 10px;box-shadow:0 -6px 24px rgba(0,0,0,.45);display:flex;flex-direction:column}
-.pph{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.pph b{font-size:16px;color:var(--accent)}
-.pph button{padding:4px 12px}
-.poseGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;overflow-y:auto;overscroll-behavior:contain}
-.poseGrid button{padding:7px 2px;font-size:16px;line-height:1.25;border-radius:9px;word-break:keep-all}
-.poseGrid button.on{background:var(--accent);color:#1a1712;border-color:var(--accent);font-weight:700}
 .toast{position:fixed;left:50%;bottom:calc(var(--dock) + var(--sab) + 16px);transform:translateX(-50%);
   background:#26282d;border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:16px;z-index:40;
   max-width:400px;width:max-content;opacity:0;transition:opacity .25s;pointer-events:none}
@@ -123,23 +114,12 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
   <div class="stage" id="stage">
     <canvas id="cv"></canvas>
     <div class="rec" id="recBadge">● REC</div>
-    <div class="camseg" id="camSeg">
-      <button data-cam="face" class="on">얼굴</button><button data-cam="bust">바스트</button><button data-cam="full">전신</button>
-    </div>
     <div class="lower">
       <div class="tag"><b id="tagName">HANA</b><span>AI 아나운서</span></div>
     </div>
     <div class="ovl" id="ovl"><div id="ovlTxt">3D 모델 불러오는 중…</div><div class="bar"><i id="ovlBar"></i></div></div>
   </div>
   <div class="sub" id="sub"><span class="done"></span><span class="todo">대본을 입력하고 ▶ 읽기를 누르세요.</span></div>
-
-  <div class="card">
-    <h2>아나운서</h2>
-    <div class="seg" id="avSeg">
-      <button data-av="hana" class="on">하나 · HANA</button>
-      <button data-av="freya">프레야 · FREYA</button>
-    </div>
-  </div>
 
   <div class="card">
     <h2>대본</h2>
@@ -210,11 +190,6 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
     <div class="row" style="margin-top:8px"><button id="btnRec">● 녹화하며 읽기</button></div>
   </div>
 
-  <div class="card">
-    <h2>자세</h2>
-    <div class="muted">고개 숙이기·엎드리기·눕기 등 20가지 자세를 고릅니다. 말하는 중에도 바꿀 수 있습니다.</div>
-    <div class="row" style="margin-top:8px"><button id="btnPose">자세 정하기</button></div>
-  </div>
 </div>
 
 <div class="dock"><div class="in">
@@ -222,10 +197,6 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
   <button class="play" id="btnPlay">▶ 읽기</button>
   <button id="btnPause" aria-label="일시정지">❚❚</button>
 </div></div>
-<div class="posePanel hide" id="posePanel">
-  <div class="pph"><b>자세 정하기</b><button id="poseClose" aria-label="닫기">✕</button></div>
-  <div class="poseGrid" id="poseGrid"></div>
-</div>
 <div class="toast" id="toast"></div>
 
 <script type="module">
@@ -408,66 +379,18 @@ const key = new THREE.DirectionalLight(0xffe9d6, 1.55); key.position.set(-1.2, 2
 const fill = new THREE.DirectionalLight(0xcfe0ff, .45); fill.position.set(1.8, 1.2, 1.6); scene.add(fill);
 const rim = new THREE.DirectionalLight(0xbfd6ff, 1.6); rim.position.set(.6, 2.2, -2.4); scene.add(rim);
 scene.add(new THREE.HemisphereLight(0xdfe8f2, 0x2a2420, .22));
-{ const f = new THREE.Mesh(new THREE.CircleGeometry(1.7, 64), new THREE.MeshStandardMaterial({ color: 0x1c2531, roughness: .85, metalness: 0, transparent: true, opacity: .9 }));
-  f.rotation.x = -Math.PI / 2; f.position.y = -.002; scene.add(f); }
 const camera = new THREE.PerspectiveCamera(22, 1, .02, 60);
 const controls = new OrbitControls(camera, canvas);
 controls.enablePan = false; controls.enableDamping = true; controls.dampingFactor = .08;
-controls.minDistance = .1; controls.maxDistance = 8; controls.rotateSpeed = .6;
-controls.minPolarAngle = .02; controls.maxPolarAngle = Math.PI - .02;   // free 360° orbit
-controls.zoomToCursor = true;                                            // mouse wheel zooms toward the cursor
-controls.touches.TWO = null;                                             // two-finger gestures handled below
-
-/* Pinch: zoom toward the point between the fingers (it stays under them), two-finger drag pans,
-   and on release that point becomes the orbit centre (view glides so it is centred). */
-const touchPts = new Map(); let pinch = null;
-const _ray = new THREE.Raycaster(), _nd = new THREE.Vector2(), _pv = new THREE.Vector3(), _pv2 = new THREE.Vector3(), _pl = new THREE.Plane();
-function ndcAt(x, y) { const r = canvas.getBoundingClientRect(); return _nd.set((x - r.left) / r.width * 2 - 1, -(y - r.top) / r.height * 2 + 1); }
-function pickPoint(x, y) {
-  _ray.setFromCamera(ndcAt(x, y), camera);
-  const meshes = [];
-  if (avatar && avatar.root) avatar.root.traverse(o => { if (o.isMesh && o.visible) { if (o.isSkinnedMesh) o.boundingSphere = null; meshes.push(o); } });
-  const hit = _ray.intersectObjects(meshes, false)[0];
-  if (hit) return hit.point.clone();
-  camera.getWorldDirection(_pv2); _pl.setFromNormalAndCoplanarPoint(_pv2, controls.target);
-  return _ray.ray.intersectPlane(_pl, new THREE.Vector3()) || controls.target.clone();
+controls.rotateSpeed = .6;
+controls.enableZoom = false; controls.enablePan = false;            // face view only: no zoom
+controls.minAzimuthAngle = -Math.PI / 2; controls.maxAzimuthAngle = Math.PI / 2;   // left/right 180° in total
+controls.touches.TWO = null;
+/** limit up/down to ±10° (20° in total) around the face camera's own angle */
+function lockOrbit() {
+  const off = camera.position.clone().sub(controls.target), pol = Math.acos(clamp(off.y / off.length(), -1, 1)), lim = 10 * Math.PI / 180;
+  controls.minPolarAngle = pol - lim; controls.maxPolarAngle = pol + lim;
 }
-function pinchInfo() { const [a, b] = [...touchPts.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }; }
-canvas.addEventListener('pointerdown', e => {
-  if (e.pointerType !== 'touch') return;
-  touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (touchPts.size === 2) { camAnim = null; const i = pinchInfo(); pinch = { P: pickPoint(i.mx, i.my), d: i.d, mx: i.mx, my: i.my }; }
-});
-canvas.addEventListener('pointermove', e => {
-  if (!touchPts.has(e.pointerId)) return;
-  touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-  if (!pinch || touchPts.size !== 2) return;
-  const i = pinchInfo(), P = pinch.P;
-  // zoom about P (P keeps its screen position)
-  let sc = pinch.d / Math.max(i.d, 1);
-  const dist = camera.position.distanceTo(P), nd = clamp(dist * sc, .08, 8); sc = nd / Math.max(dist, 1e-6);
-  camera.position.sub(P).multiplyScalar(sc).add(P);
-  controls.target.sub(P).multiplyScalar(sc).add(P);
-  // pan with the finger midpoint
-  const h = canvas.getBoundingClientRect().height, wpp = 2 * camera.position.distanceTo(P) * Math.tan(camera.fov * Math.PI / 360) / h;
-  _pv.setFromMatrixColumn(camera.matrixWorld, 0).multiplyScalar(-(i.mx - pinch.mx) * wpp);
-  _pv2.setFromMatrixColumn(camera.matrixWorld, 1).multiplyScalar((i.my - pinch.my) * wpp);
-  _pv.add(_pv2); camera.position.add(_pv); controls.target.add(_pv);
-  camera.updateMatrixWorld();
-  pinch.d = i.d; pinch.mx = i.mx; pinch.my = i.my;
-});
-function endTouch(e) {
-  if (!touchPts.delete(e.pointerId)) return;
-  if (pinch && touchPts.size < 2) {
-    const P = pinch.P; pinch = null;
-    const off = P.clone().sub(controls.target);   // glide so P becomes the orbit centre
-    camAnim = { from: { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov },
-                to: { pos: camera.position.clone().add(off), target: P.clone(), fov: camera.fov }, t: 0, dur: .45 };
-    camName = 'free'; document.querySelectorAll('#camSeg button').forEach(b => b.classList.remove('on'));
-  }
-}
-canvas.addEventListener('pointerup', endTouch); canvas.addEventListener('pointercancel', endTouch);
-window.__pinchTest = { get target() { return controls.target; }, pickPoint };
 let eyeRef = { y: 1.6, z: .065 };      // set from the active avatar's eye position
 const _cv = new THREE.Vector3();
 function camPreset(name) {
@@ -487,9 +410,8 @@ function setCam(name, instant, live) {
     else if (avatar.eyeWorld) eyeRef = { y: avatar.eyeWorld.y, z: avatar.eyeWorld.z };
   }
   const c = camPreset(name); if (!c) return; camName = name;
-  document.querySelectorAll('#camSeg button').forEach(b => b.classList.toggle('on', b.dataset.cam === name));
   const to = { pos: new THREE.Vector3(...c.pos), target: new THREE.Vector3(...c.target), fov: c.fov };
-  if (instant) { camAnim = null; camera.position.copy(to.pos); controls.target.copy(to.target); camera.fov = to.fov; camera.updateProjectionMatrix(); return; }
+  if (instant) { camAnim = null; camera.position.copy(to.pos); controls.target.copy(to.target); lockOrbit(); controls.target.copy(to.target); camera.fov = to.fov; camera.updateProjectionMatrix(); return; }
   camAnim = { from: { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov }, to, t: 0 };
 }
 
@@ -513,21 +435,6 @@ const AVATARS = {
       footL: 'foot.l', footR: 'foot.r', toeL: 'toes_01.l', toeR: 'toes_01.r' },
     base: { forearmL: [-.12, 0, 0], forearmR: [-.12, 0, 0] },
   },
-  freya: {
-    name: 'FREYA', file: 'freya.glb',
-    head: [['DEF-spine.006', .6]], neck: [['DEF-spine.005', .4]], chest: [['DEF-spine.003', .006], ['DEF-spine.004', -.004]],
-    eyes: [{ bones: ['DEF-eye.L', 'DEF-eye_iris.L', 'DEF-eye_master.L'], pivot: 'DEF-eye.L' },
-           { bones: ['DEF-eye.R', 'DEF-eye_iris.R', 'DEF-eye_master.R'], pivot: 'DEF-eye.R' }],
-    tongue: ['DEF-tongue', 'DEF-tongue.001', 'DEF-tongue.002'],
-    joints: { hips: 'DEF-spine', spine1: 'DEF-spine.001', spine2: 'DEF-spine.002', chest: 'DEF-spine.003', neck: 'DEF-spine.005', head: 'DEF-spine.006',
-      shoulderL: 'DEF-shoulder.L', shoulderR: 'DEF-shoulder.R', upperArmL: 'DEF-upper_arm.L', upperArmR: 'DEF-upper_arm.R',
-      forearmL: 'DEF-forearm.L', forearmR: 'DEF-forearm.R', handL: 'DEF-hand.L', handR: 'DEF-hand.R',
-      thighL: 'DEF-thigh.L', thighR: 'DEF-thigh.R', shinL: 'DEF-shin.L', shinR: 'DEF-shin.R',
-      footL: 'DEF-foot.L', footR: 'DEF-foot.R', toeL: 'DEF-toe.L', toeR: 'DEF-toe.R' },
-    // A-pose → arms-down announcer stance
-    base: { shoulderL: [0, 0, -.06], shoulderR: [0, 0, .06], upperArmL: [.08, 0, -.62], upperArmR: [.08, 0, .62],
-      forearmL: [-.55, -.25, -.12], forearmR: [-.55, .25, .12], handL: [-.1, 0, .25], handR: [-.1, 0, -.25] },
-  },
 };
 const loaded = {};               // id -> avatar runtime
 let avatar = { ready: false, morphMeshes: [], bones: {}, rest: {}, parentQ: {}, cfg: AVATARS.hana };
@@ -547,19 +454,15 @@ function tuneMaterial(o, m) {
     m.transparent = false; m.alphaTest = .22; m.alphaToCoverage = true; m.roughness = .6;
   } else if (n === 'Stockings') { m.transparent = false; m.alphaTest = .5; m.alphaToCoverage = true; }
   else if (n === 'Glass') { m.transparent = true; m.opacity = .12; m.roughness = .03; m.metalness = 0; m.depthWrite = false; o.renderOrder = 2; }
-  else if (n === 'Body' || n === 'body') { m.envMapIntensity = .6; m.roughness = Math.max(m.roughness, .55); }
+  else if (n === 'Body' || n === 'Mouth' || n === 'body') { m.envMapIntensity = .6; m.roughness = Math.max(m.roughness, .55); }
   else if (n === 'eyes') { m.roughness = .12; m.envMapIntensity = 1.1; }
-  // mouth interior: real mouths are mostly in shadow — darken teeth a little, tongue/gums more, kill reflections
-  else if (n === 'teeth') { m.color.multiplyScalar(.55); m.roughness = Math.max(m.roughness, .5); m.envMapIntensity = .12; }
-  else if (n === 'teeth.001') { m.color.multiplyScalar(.32); m.roughness = Math.max(m.roughness, .6); m.envMapIntensity = .08; }
-  if (n === 'Mouth') { m.color.multiplyScalar(.45); m.roughness = Math.max(m.roughness, .55); m.envMapIntensity = .1; }
+  else if (n === 'teeth' || n === 'teeth.001') { m.roughness = Math.max(m.roughness, .4); m.envMapIntensity = .5; }
   if (n === 'Eyes') { m.envMapIntensity = 1.2; }
 }
 function selectAvatar(id) {
   if (id === curId) return;
   if (player.state !== 'idle') stopAll();
   curId = id; const cfg = AVATARS[id];
-  document.querySelectorAll('#avSeg button').forEach(b => b.classList.toggle('on', b.dataset.av === id));
   $('tagName').textContent = cfg.name;
   for (const k in loaded) if (loaded[k].root) loaded[k].root.visible = k === id;
   if (loaded[id] && loaded[id].ready) { activate(loaded[id]); return; }
@@ -1072,27 +975,6 @@ const mir = v => [v[0], -v[1], -v[2]];
 function sym(o) { const r = { ...o }; for (const k in o) if (k.endsWith('L')) r[k.slice(0, -1) + 'R'] = mir(o[k]); return r; }
 const POSES = [
   { id: 'stand',   name: '기본 자세', j: {} },
-  { id: 'headDown',name: '고개 숙이기', j: { head: [.5, 0, 0], neck: [.3, 0, 0] } },
-  { id: 'headUp',  name: '고개 들기', j: { head: [-.35, 0, 0], neck: [-.2, 0, 0] } },
-  { id: 'tilt',    name: '고개 갸웃', j: { head: [0, 0, .3], neck: [0, 0, .12] } },
-  { id: 'bow',     name: '인사하기', cam: 'full', j: { spine1: [.32, 0, 0], spine2: [.3, 0, 0], chest: [.22, 0, 0], head: [.15, 0, 0], ...sym({ upperArmL: [-.25, 0, -.1], forearmL: [-.55, -.45, 0] }) } },
-  { id: 'raiseR',  name: '오른손 들기', cam: 'full', j: { upperArmR: [0, 0, -2.7], forearmR: [0, 0, -.2], head: [0, 0, -.05] } },
-  { id: 'raiseL',  name: '왼손 들기', cam: 'full', j: { upperArmL: [0, 0, 2.7], forearmL: [0, 0, .2], head: [0, 0, .05] } },
-  { id: 'hooray',  name: '만세', cam: 'full', j: { ...sym({ upperArmL: [0, 0, 2.75], forearmL: [0, 0, .15] }), head: [-.12, 0, 0] } },
-  { id: 'wave',    name: '손 흔들기', cam: 'bust', j: { upperArmR: [-.35, 0, -.42], forearmR: [-.25, 0, -2.35], head: [0, 0, -.06] },
-    anim: t => ({ forearmR: [0, 0, Math.sin(t * 7) * .28], handR: [0, 0, Math.sin(t * 7 + .6) * .2] }) },
-  { id: 'hips',    name: '허리에 손', cam: 'full', j: sym({ upperArmL: [.2, 0, .6], forearmL: [-.35, 0, -1.5], handL: [0, 0, .3] }) },
-  { id: 'cross',   name: '팔짱 끼기', cam: 'bust', j: { upperArmL: [-.45, 0, .1], forearmL: [-1.55, -1.15, 0], upperArmR: [-.4, 0, -.1], forearmR: [-1.4, 1.2, 0] } },
-  { id: 'clasp',   name: '손 모으기', cam: 'bust', j: { ...sym({ upperArmL: [-.25, 0, -.12], forearmL: [-1.0, -.8, 0] }), head: [.08, 0, 0] } },
-  { id: 'think',   name: '생각하기', cam: 'bust', j: { upperArmR: [-.6, 0, .18], forearmR: [-2.3, .45, 0], upperArmL: [-.2, 0, -.1], forearmL: [-1.4, -1.1, 0], head: [.1, 0, -.12] } },
-  { id: 'sit',     name: '의자에 앉기', cam: 'full', stool: true, j: { ...sym({ thighL: [-1.5, 0, .06], shinL: [1.5, 0, 0], upperArmL: [-.35, 0, -.05], forearmL: [-.75, -.25, 0] }), spine1: [-.05, 0, 0] } },
-  { id: 'squat',   name: '쪼그려 앉기', cam: 'full', j: { ...sym({ thighL: [-2.15, 0, .28], shinL: [2.5, 0, 0], footL: [-.3, 0, 0], upperArmL: [-.75, 0, -.1], forearmL: [-.55, -.3, 0] }), spine1: [.35, 0, 0], spine2: [.25, 0, 0], head: [-.35, 0, 0] } },
-  { id: 'leg',     name: '한쪽 다리 들기', cam: 'full', j: { thighL: [-1.4, 0, 0], shinL: [1.5, 0, 0], footL: [.25, 0, 0], ...sym({ upperArmL: [0, 0, .65] }) } },
-  { id: 'lieBack', name: '눕기', cam: 'floor', root: { steps: [['z', PI / 2], ['x', -PI / 2]], x: .82 }, j: { ...sym({ upperArmL: [0, 0, .12] }), head: [-.1, 0, 0] } },
-  { id: 'allfours', name: '엎드리기', cam: 'floor', root: { steps: [['x', PI / 2], ['y', -PI / 2]], x: 1.1 },
-    j: { ...sym({ thighL: [-1.57, 0, .04], shinL: [1.57, 0, 0], footL: [.6, 0, 0], upperArmL: [-1.57, 0, .08], forearmL: [0, 0, 0], handL: [-1.3, 0, 0] }), head: [-.75, 0, 0], neck: [-.25, 0, 0] } },
-  { id: 'prone',   name: '엎드려 눕기', cam: 'floor', root: { steps: [['z', PI / 2], ['x', PI / 2]], x: .82 }, j: { head: [-.7, 0, 0], neck: [-.3, 0, 0], ...sym({ upperArmL: [0, 0, .12] }) } },
-  { id: 'lieSide', name: '옆으로 눕기', cam: 'floor', root: { steps: [['z', PI / 2]], x: .82 }, j: { thighL: [-.75, 0, 0], shinL: [.95, 0, 0], upperArmR: [-1.3, 0, 0], forearmR: [-.6, 0, 0], upperArmL: [.1, 0, -.1], head: [0, 0, -.25] } },
 ];
 const POSE_BY_ID = Object.fromEntries(POSES.map(p => [p.id, p]));
 const poseState = { id: 'stand', t: 0 };
@@ -1102,7 +984,6 @@ let stool = null;
 function setPose(id) {
   const p = POSE_BY_ID[id]; if (!p) return;
   poseState.id = id; poseState.t = 0; poseState.recam = true;
-  document.querySelectorAll('#poseGrid button').forEach(b => b.classList.toggle('on', b.dataset.pose === id));
   if (p.cam) setCam(p.cam); else if (camName === 'floor' || camName === 'full') setCam('face');
 }
 function applyBodyPose(dt, T, br) {
@@ -1175,28 +1056,6 @@ function segBind(id, attr, cur, fn) {
 }
 segBind('engSeg', 'eng', ui.eng, v => { ui.eng = v; store.set('eng', v); $('devBox').classList.toggle('hide', v !== 'device'); $('gemBox').classList.toggle('hide', v !== 'gemini'); });
 segBind('toneSeg', 'tone', ui.tone, v => { ui.tone = v; store.set('tone', v); if (player.state === 'idle') st.mood = v === 'auto' ? 'calm' : (v === 'serious' ? 'serious' : v); });
-let camInit = true; segBind('camSeg', 'cam', 'face', v => { setCam(v, camInit); camInit = false; });
-// pose menu: compact sheet above the dock; page scrolls so the stage stays fully visible
-$('poseGrid').innerHTML = POSES.map(p => `<button data-pose="${p.id}">${p.name}</button>`).join('');
-$('poseGrid').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setPose(b.dataset.pose); });
-function fitPosePanel() {
-  const pnl = $('posePanel'); if (pnl.classList.contains('hide')) return;
-  const dockH = document.querySelector('.dock').offsetHeight;
-  const stageBottom = stage.getBoundingClientRect().bottom;
-  const room = innerHeight - dockH - stageBottom - 6;
-  pnl.style.maxHeight = Math.max(96, room) + 'px';
-  $('poseGrid').style.maxHeight = Math.max(52, room - 44) + 'px';
-}
-function openPosePanel() {
-  $('posePanel').classList.remove('hide');
-  window.scrollTo({ top: 0, behavior: 'instant' });
-  fitPosePanel(); requestAnimationFrame(fitPosePanel); setTimeout(fitPosePanel, 300);
-  document.querySelectorAll('#poseGrid button').forEach(b => b.classList.toggle('on', b.dataset.pose === poseState.id));
-}
-$('btnPose').onclick = openPosePanel;
-$('poseClose').onclick = () => $('posePanel').classList.add('hide');
-addEventListener('resize', fitPosePanel); addEventListener('scroll', fitPosePanel, { passive: true });
-$('avSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (b) selectAvatar(b.dataset.av); });
 selectAvatar('hana');
 $('gemKey').value = store.get('gemKey', ''); $('gemKey').addEventListener('change', e => store.set('gemKey', e.target.value.trim()));
 $('gemVoice').value = store.get('gemVoice', 'Kore'); $('gemVoice').addEventListener('change', e => store.set('gemVoice', e.target.value));
@@ -1228,7 +1087,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && pla
 /* test hook (used by automated checks) */
 window.__anchor = { buildTimeline, splitSentences, numKo, sampleTimeline, alignTimeline, sentenceMood, face, st, player, VIS,
   setTest(v, mood) { st.test = v; st.testUntil = 1e9; st.testMood = mood || null; st.testMoodUntil = mood ? 1e9 : 0; },
-  setCam, startReading, stopAll, camera, scene, selectAvatar, setPose, POSES, openPosePanel, get avatar() { return avatar; } };
+  setCam, startReading, stopAll, camera, scene, get avatar() { return avatar; } };
 </script>
 </body>
 </html>
