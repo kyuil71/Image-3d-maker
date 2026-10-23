@@ -425,14 +425,14 @@ const MOODS = {
 };
 /* ---- commanded face control (AI "오른쪽 봐", "웃어봐", …) ----
    Held states persist until changed; left/right are screen directions (screen right = world +X). */
-const EXPR = {
-  smile:    { mouthSmileL: .78, mouthSmileR: .78, eyeSquint: .38, browUp: .1, upperLipUp: .06 },
-  laugh:    { mouthSmileL: 1, mouthSmileR: 1, jawOpen: .3, upperLipUp: .3, lowerLipDown: .15, eyeSquint: .65, browUp: .22 },
-  shy:      { mouthSmileL: .45, mouthSmileR: .36, eyeSquint: .2, browInnerUp: .28, mouthPress: .15 },
-  sad:      { browInnerUp: .85, mouthFrown: .6, browDown: .08, eyeBlinkL: .18, eyeBlinkR: .18, mouthPress: .12 },
-  cry:      { browInnerUp: 1, mouthFrown: .85, eyeSquint: .5, eyeBlinkL: .3, eyeBlinkR: .3, mouthPress: .2, jawOpen: .06, lowerLipDown: .15 },
-  angry:    { browDown: .9, mouthFrown: .4, mouthPress: .55, eyeSquint: .35 },
-  surprise: { browUp: 1, browInnerUp: .3, jawOpen: .42, mouthPucker: .22, upperLipUp: .12, eyeBlinkL: -.25, eyeBlinkR: -.25 },
+const EXPR = {   // blend-shape weights may exceed 1: this model's smile/frown/brow shapes are shallow
+  smile:    { mouthSmileL: 1.5, mouthSmileR: 1.5, eyeSquint: .6, browUp: .15, upperLipUp: .12, mouthWide: .12 },
+  laugh:    { mouthSmileL: 1.75, mouthSmileR: 1.75, jawOpen: .34, upperLipUp: .38, lowerLipDown: .22, eyeSquint: 1, browUp: .3, mouthWide: .18 },
+  shy:      { mouthSmileL: .95, mouthSmileR: .7, eyeSquint: .35, browInnerUp: .6, mouthPress: .25 },
+  sad:      { browInnerUp: 1.5, mouthFrown: 1.4, browDown: .12, eyeBlinkL: .22, eyeBlinkR: .22, mouthPress: .25 },
+  cry:      { browInnerUp: 1.75, mouthFrown: 1.7, eyeSquint: .85, eyeBlinkL: .32, eyeBlinkR: .32, mouthPress: .15, jawOpen: .07, lowerLipDown: .3 },
+  angry:    { browDown: 1.6, mouthFrown: .8, mouthPress: .8, eyeSquint: .6 },
+  surprise: { browUp: 1.6, browInnerUp: .55, jawOpen: .45, mouthPucker: .25, upperLipUp: .15, eyeBlinkL: -.3, eyeBlinkR: -.3 },
 };
 const EXPR_POST = { sad: { hx: .12, ex: .12 }, cry: { hx: .17, ex: .14 }, shy: { hx: .14, ex: .18, hz: .06 }, angry: { hx: .07 }, surprise: { hx: -.05 }, laugh: { hx: -.04 } };
 const ctl = { h: { x: 0, y: 0, z: 0 }, e: { x: 0, y: 0 }, expr: null, mouth: null, eyes: null, osc: [], wink: null, laughUntil: 0,
@@ -1140,7 +1140,7 @@ function update(dt, T) {
   }
   for (const m of avatar.morphMeshes) {
     const d = m.morphTargetDictionary, inf = m.morphTargetInfluences;
-    for (const k of MORPHS) { const i = d[k]; if (i !== undefined) inf[i] = clamp(face[k], -.3, 1.15); }
+    for (const k of MORPHS) { const i = d[k]; if (i !== undefined) inf[i] = clamp(face[k], -.3, k.startsWith('eyeBlink') ? 1.1 : 1.8); }
   }
 
   // --- head & body (spring nod + idle noise + breathing)
