@@ -67,6 +67,9 @@ print('EYELID CLOSE', close)
 # ---- neutral (arms down) + shapes
 reset_pose(); arms_down()
 neutral = {n: coords(n) for n in MESHES}
+# deform-bone pose matrices with arms down -> become the new rest pose
+DEF_POSE = {b.name: b.matrix.copy() for b in pb if b.bone.use_deform}
+DEF_LEN = {b.name: (b.tail - b.head).length for b in pb if b.bone.use_deform}
 deltas = {}
 for sname, spec in SHAPES.items():
     reset_pose(); arms_down()
@@ -83,6 +86,26 @@ for sname, spec in SHAPES.items():
     deltas[sname] = {n: coords(n) - neutral[n] for n in MESHES}
     print('SHAPE', sname, {n: round(float(np.abs(d).max()) * 1000, 2) for n, d in deltas[sname].items() if np.abs(d).max() > 1e-5})
 reset_pose()
+
+# ---- natural chest volume: shrink forward projection of the bust (same warp on every mesh keeps clothes on)
+BUST = dict(cx=0.09, cz=1.30, rx=0.15, rz=0.15, wall=-0.125, keep=0.28)
+def bust_warp(a):
+    a = a.copy()
+    for sx in (1, -1):
+        dx = (a[:, 0] * sx - BUST['cx']) / BUST['rx']; dz = (a[:, 2] - BUST['cz']) / BUST['rz']
+        d = np.sqrt(dx * dx + dz * dz)
+        t = np.clip((1.0 - d) / 0.5, 0, 1); w = t * t * (3 - 2 * t)        # 1 inside, smooth to 0 at the rim
+        f = BUST['wall'] - a[:, 1]                                            # depth in front of chest wall
+        m = (f > 0) & (w > 0)
+        a[m, 1] += f[m] * w[m] * (1 - BUST['keep'])                           # pull toward the wall
+        g = np.clip(f[m] / 0.04, 0, 1)
+        a[m, 2] += (BUST['cz'] + 0.02 - a[m, 2]) * w[m] * 0.10 * g                 # slight lift / tighten
+        a[m, 0] += (BUST['cx'] * sx - a[m, 0]) * w[m] * 0.34 * g                    # narrower side bulge
+    return a
+for n in MESHES:
+    if n in ('body', 'shirt', 'hair'):
+        before = neutral[n][:, 1].min(); neutral[n] = bust_warp(neutral[n])
+        print('BUST', n, 'front y', round(before, 3), '->', round(neutral[n][:, 1].min(), 3))
 
 # ---- write basis (arms down) + shape keys
 for n in MESHES:
@@ -105,6 +128,65 @@ for b in pb:
 keep = set(MESHES) | {'rig'}
 for o in list(bpy.data.objects):
     if o.name not in keep: bpy.data.objects.remove(o, do_unlink=True)
+reset_pose()
+
+# ---- rebuild a proper FK hierarchy of deform bones on the arms-down rest pose
+vl0 = {o.name for o in bpy.context.view_layer.objects}
+if 'rig' not in vl0: bpy.context.scene.collection.objects.link(rig)
+for lc in bpy.context.view_layer.layer_collection.children: lc.exclude = False
+upd()
+bpy.context.view_layer.objects.active = rig; rig.hide_set(False); rig.hide_viewport = False
+rig.data.collections_all and [setattr(c, 'is_visible', True) for c in rig.data.collections_all]
+bpy.ops.object.mode_set(mode='EDIT')
+eb = rig.data.edit_bones
+for n, mtx in DEF_POSE.items():
+    if n in eb:
+        eb[n].matrix = mtx.normalized(); eb[n].length = max(DEF_LEN[n], 1e-4)
+defs = [b for b in eb if b.use_deform]
+EXPLICIT = {'spine_01.x': 'root.x', 'spine_02.x': 'spine_01.x', 'spine_03.x': 'spine_02.x', 'spine_04.x': 'spine_03.x',
+            'spine_05.x': 'spine_04.x', 'thigh_twist.l': 'root.x', 'thigh_twist.r': 'root.x', 'root.x': None,
+            'arm_stretch.l': 'arm_twist_2.l', 'arm_stretch.r': 'arm_twist_2.r', 'thigh_stretch.l': 'thigh_twist_2.l', 'thigh_stretch.r': 'thigh_twist_2.r'}
+def seg_dist(p, a, b):
+    ab = b - a; t = max(0, min(1, (p - a).dot(ab) / max(ab.length_squared, 1e-12))); return (a + ab * t - p).length
+orig = {}
+for b in defs:
+    p = b.parent
+    while p and not p.use_deform: p = p.parent
+    orig[b.name] = p.name if p else None
+newpar = {}
+for b in defs:
+    n = b.name
+    if n in EXPLICIT: newpar[n] = EXPLICIT[n]; continue
+    best = None; bd = 0.006
+    for o in defs:
+        if o is b: continue
+        d = (o.tail - b.head).length
+        if d < bd: bd = d; best = o.name
+    if best is None and orig[n]: best = orig[n]
+    if best is None:
+        bd = 1e9
+        for o in defs:
+            if o is b: continue
+            d = seg_dist(b.head, o.head, o.tail)
+            if d < bd: bd = d; best = o.name
+    newpar[n] = best
+# avoid cycles
+def anc(n, seen):
+    while n:
+        if n in seen: return True
+        seen.add(n); n = newpar.get(n)
+    return False
+for n in list(newpar):
+    if anc(n, set()): newpar[n] = orig[n] or 'root.x'
+for b in defs:
+    b.use_connect = False; b.parent = None
+for b in defs:
+    b.parent = eb[newpar[b.name]] if newpar[b.name] else None
+for b in [b for b in eb if not b.use_deform]: eb.remove(b)
+bpy.ops.object.mode_set(mode='OBJECT')
+print('NEWPAR', {k: newpar[k] for k in ['arm_stretch.l','arm_twist_2.l','c_arm_twist_offset.l','thigh_stretch.l','thigh_twist_2.l']})
+for n in ['arm_stretch.l', 'thigh_stretch.l', 'head.x', 'neck.x', 'spine_05.x', 'forearm_stretch.l', 'hand.l', 'c_index1_base.l', 'foot.l', 'leg_stretch.l', 'c_eye.l']:
+    bb = rig.data.bones.get(n); print('HIER', n, '<-', bb.parent.name if bb and bb.parent else None, tuple(round(x, 3) for x in bb.head_local) if bb else None)
 reset_pose()
 
 # ---- materials
