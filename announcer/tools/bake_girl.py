@@ -102,8 +102,9 @@ def bust_warp(a):
         a[m, 2] += (BUST['cz'] + 0.02 - a[m, 2]) * w[m] * 0.10 * g                 # slight lift / tighten
         a[m, 0] += (BUST['cx'] * sx - a[m, 0]) * w[m] * 0.34 * g                    # narrower side bulge
     return a
+NO_BUST = '--no-bust' in sys.argv
 for n in MESHES:
-    if n in ('body', 'shirt', 'hair'):
+    if n in ('body', 'shirt', 'hair') and not NO_BUST:
         before = neutral[n][:, 1].min(); neutral[n] = bust_warp(neutral[n])
         print('BUST', n, 'front y', round(before, 3), '->', round(neutral[n][:, 1].min(), 3))
 
