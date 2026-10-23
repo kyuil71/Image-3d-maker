@@ -435,9 +435,8 @@ const EXPR = {   // blend-shape weights may exceed 1: this model's smile/frown/b
   surprise: { browUp: 1.6, browInnerUp: .55, jawOpen: .45, mouthPucker: .25, upperLipUp: .15, eyeBlinkL: -.3, eyeBlinkR: -.3 },
 };
 const EXPR_POST = { sad: { hx: .12, ex: .12 }, cry: { hx: .17, ex: .14 }, shy: { hx: .14, ex: .18, hz: .06 }, angry: { hx: .07 }, surprise: { hx: -.05 }, laugh: { hx: -.04 } };
-const ctl = { h: { x: 0, y: 0, z: 0 }, e: { x: 0, y: 0 }, expr: null, mouth: null, eyes: null, osc: [], wink: null, laughUntil: 0,
+const ctl = { h: { x: 0, y: 0, z: 0 }, e: { x: 0, y: 0 }, expr: null, mouth: null, eyes: null, osc: [], wink: null, laughLeft: 0,
   cur: { hx: 0, hy: 0, hz: 0, ex: 0, ey: 0 }, o: { x: 0, y: 0, z: 0 } };
-const nowT = () => clockT.elapsedTime;
 const osc = (axis, amp, f, dur) => ctl.osc.push({ axis, amp, f, dur, t: 0 });
 const ACTS = {
   look_left:       { ko: '왼쪽 보기',      f: k => { ctl.h.y = -.3 * k; ctl.e.y = -.22; } },
@@ -458,7 +457,7 @@ const ACTS = {
   nod:             { ko: '끄덕',           f: k => osc('x', .17 * Math.min(k, 1.3), 2.2, 1.5) },
   shake:           { ko: '도리도리',       f: k => osc('y', .24 * Math.min(k, 1.3), 2.4, 1.7) },
   smile:           { ko: '웃기',           f: () => { ctl.expr = 'smile'; } },
-  laugh:           { ko: '크게 웃기',      f: () => { ctl.expr = 'laugh'; ctl.laughUntil = nowT() + 2.8; } },
+  laugh:           { ko: '크게 웃기',      f: () => { ctl.expr = 'laugh'; ctl.laughLeft = 2.8; } },
   shy:             { ko: '수줍게',         f: () => { ctl.expr = 'shy'; } },
   sad:             { ko: '슬픈 표정',      f: () => { ctl.expr = 'sad'; } },
   cry:             { ko: '울기',           f: () => { ctl.expr = 'cry'; } },
@@ -1087,7 +1086,7 @@ function update(dt, T) {
   }
 
   // --- mood layer (slow)
-  if (ctl.expr === 'laugh' && T > ctl.laughUntil) ctl.expr = 'smile';
+  if (ctl.expr === 'laugh' && (ctl.laughLeft -= dt) <= 0) ctl.expr = 'smile';
   const mood = st.testMood && T < st.testMoodUntil ? MOODS[st.testMood] : ctl.expr ? EXPR[ctl.expr] : aiMood ? MOODS[aiMood] : (MOODS[st.mood] || MOODS.calm);
   for (const k of MORPHS) st.moodW[k] = lerp(st.moodW[k], mood[k] || 0, 1 - Math.exp(-dt / .35));
 
