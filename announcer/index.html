@@ -94,6 +94,29 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
   background:#26282d;border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:16px;z-index:40;
   max-width:400px;width:max-content;opacity:0;transition:opacity .25s;pointer-events:none}
 .toast.show{opacity:1}
+
+/* AI conversation */
+.aibtn{padding:4px 14px;font-weight:800;letter-spacing:.1em;border-radius:9px;background:var(--panel2);color:var(--accent2);border-color:var(--accent2)}
+.aibtn.open{background:#24303a}
+.aibtn.on{background:var(--accent2);color:#0f1012;box-shadow:0 0 0 3px rgba(143,179,201,.25)}
+.linkbtn{display:block;text-align:center;margin-top:8px;padding:11px;border:1px solid var(--accent2);color:var(--accent2);
+  border-radius:11px;text-decoration:none;font-size:16px}
+.btnmain{background:var(--accent);color:#1a1712;font-weight:700;border-color:var(--accent)}
+.aistart{text-align:center;font-weight:700;color:var(--ok);padding:8px;border:1px solid rgba(127,196,154,.35);border-radius:10px;background:rgba(127,196,154,.08)}
+.chat{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin:10px 0 6px}
+.chat:empty{display:none}
+.msg{max-width:86%;padding:8px 12px;border-radius:12px;font-size:16px;line-height:1.5;white-space:pre-wrap;word-break:keep-all}
+.msg.me{align-self:flex-end;background:#2b3440;border-bottom-right-radius:4px}
+.msg.ai{align-self:flex-start;background:var(--panel2);border-left:3px solid var(--accent);border-bottom-left-radius:4px}
+.msg.err{align-self:center;color:var(--err);background:transparent;font-size:16px}
+.micwrap{display:flex;align-items:center;gap:12px;margin:8px 0}
+.mic{width:64px;height:64px;border-radius:50%;font-size:26px;padding:0;flex:0 0 64px;background:var(--panel2)}
+.mic.on{background:var(--live);border-color:var(--live);animation:pulse 1.1s infinite}
+.mic.think{background:#3a3424;border-color:var(--warn)}
+#aiState{color:var(--sub);font-size:16px}
+.chk{display:flex;align-items:center;gap:8px;margin:10px 0 0;color:var(--sub);font-size:16px}
+.chk input{width:20px;height:20px;accent-color:var(--accent)}
+body.ai-on #cardScript,body.ai-on #cardRec{display:none}
 </style>
 <script type="importmap">
 {"imports":{
@@ -109,6 +132,7 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
     <span class="badge" id="live"><i></i>LIVE</span>
     <span class="sp"></span>
     <a href="../">K-MESH ↗</a>
+    <button class="aibtn" id="btnAI" aria-label="AI 대화">AI</button>
   </header>
 
   <div class="stage" id="stage">
@@ -121,7 +145,40 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
   </div>
   <div class="sub" id="sub"><span class="done"></span><span class="todo">대본을 입력하고 ▶ 읽기를 누르세요.</span></div>
 
-  <div class="card">
+  <div class="card hide" id="aiPanel">
+    <h2>AI 대화</h2>
+    <div id="aiSetup">
+      <label for="aiKey" style="margin-top:0">Gemini API 키</label>
+      <div class="row">
+        <input type="password" id="aiKey" placeholder="AIza…" autocomplete="off">
+        <button id="aiConnect" class="btnmain" style="flex:0 0 auto">연결</button>
+      </div>
+      <a class="linkbtn" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">🔑 API 키 만들기 (Google AI Studio) ↗</a>
+      <div class="muted" style="margin-top:6px">키는 이 기기에만 저장되고 Google 서버로만 전송됩니다.</div>
+      <div class="note" id="aiErr"></div>
+    </div>
+    <div id="aiTalk" class="hide">
+      <div class="aistart">AI와 대화를 시작합니다</div>
+      <div class="chat" id="chatLog"></div>
+      <div class="micwrap">
+        <button class="mic" id="aiMic" aria-label="말하기">🎤</button>
+        <div id="aiState">🎤를 누르고 질문을 말씀하세요.</div>
+      </div>
+      <div class="row">
+        <input type="text" id="aiText" placeholder="글로 물어봐도 됩니다" enterkeyhint="send">
+        <button id="aiSend" style="flex:0 0 auto">보내기</button>
+      </div>
+      <details style="margin-top:10px"><summary>대화 설정</summary>
+        <label class="chk"><input type="checkbox" id="aiHands" checked>대답이 끝나면 자동으로 다시 듣기</label>
+        <label class="chk"><input type="checkbox" id="aiSearch">실시간 Google 검색으로 답하기 (조금 느림)</label>
+        <label for="aiModel">대화 모델</label>
+        <select id="aiModel"></select>
+        <button id="aiReset" style="margin-top:10px;width:100%">대화 기록 지우기</button>
+      </details>
+    </div>
+  </div>
+
+  <div class="card" id="cardScript">
     <h2>대본</h2>
     <textarea id="script">안녕하십니까, 날씨 소식입니다.
 오늘은 전국이 대체로 맑겠지만, 아침까지 내륙 곳곳에 짙은 안개가 끼겠습니다. 출근길 교통안전에 유의하시기 바랍니다.
@@ -191,7 +248,7 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
     </details>
   </div>
 
-  <div class="card">
+  <div class="card" id="cardRec">
     <h2>녹화</h2>
     <div class="muted">화면을 영상으로 저장합니다(PPT 삽입용). Gemini 음성은 소리까지 함께 녹화되고, 기기 음성은 브라우저 제한으로 영상만 저장됩니다.</div>
     <div class="row" style="margin-top:8px"><button id="btnRec">● 녹화하며 읽기</button></div>
@@ -356,6 +413,8 @@ const MOODS = {
   concern:  { browInnerUp: .6, mouthFrown: .22, browDown: .05 },
   surprise: { browUp: .85, jawOpen: .12, browInnerUp: .2 },
   question: { browUp: .38, browInnerUp: .15, mouthSmileL: .12, mouthSmileR: .12 },
+  listen:   { mouthSmileL: .24, mouthSmileR: .24, browUp: .12, eyeSquint: .06 },
+  think:    { browInnerUp: .32, browUp: .1, mouthPress: .18, mouthSmileL: .06, mouthSmileR: .02 },
 };
 const POS = /감사|고맙|축하|기쁘|기쁜|좋은|좋아|행복|성공|웃|반갑|즐거|환영|최고|멋진|따뜻|흥미|기대|설레/;
 const NEG = /사고|사망|숨지|부상|피해|화재|우려|안타깝|슬프|슬픈|위기|참사|재난|실종|폭우|지진|침체|하락|논란|경고|위험/;
@@ -579,6 +638,9 @@ const player = {
   gate: null,               // optional (t)=>0..1 audio envelope
   token: 0,
 };
+/* AI conversation state (wired up in section 9) */
+const ai = { on: false, open: false, key: '', model: '', models: [], history: [], rec: null, listening: false, busy: false,
+  ctrl: null, retry: 0, mode: 'idle', hands: true, search: false };
 let audioCtx = null, recDest = null;
 function ensureAudio() {
   if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); recDest = audioCtx.createMediaStreamDestination(); }
@@ -676,7 +738,7 @@ function findAudioB64(obj) {
   walk(obj); return best;
 }
 async function geminiTTS(text, signal) {
-  const keyV = $('gemKey').value.trim(); if (!keyV) throw new Error('Gemini API 키를 입력하세요.');
+  const keyV = $('gemKey').value.trim() || ai.key; if (!keyV) throw new Error('Gemini API 키를 입력하세요.');
   const model = $('gemModel').value.trim() || 'gemini-3.8-flash-tts';
   const voice = $('gemVoice').value; const style = toneStyle();
   const headers = { 'Content-Type': 'application/json', 'x-goog-api-key': keyV };
@@ -770,7 +832,11 @@ async function playGemini(tok) {
   setStatus('음성 생성 중…');
   for (let ci = 0; ci < chunks.length; ci++) {
     const c = chunks[ci]; let buf;
-    try { buf = await fetchChunk(c); } catch (e) { if (tok === player.token) { toast('Gemini 오류: ' + e.message, 5000); stopAll(); } return; }
+    try { buf = await fetchChunk(c); } catch (e) {
+      if (tok !== player.token) return;
+      if (ai.on && ci === 0) { toast('Gemini 음성 오류 · 기기 음성으로 답합니다: ' + e.message, 4500); return startReading(0, player.text, 'device'); }
+      toast('Gemini 오류: ' + e.message, 5000); stopAll(); return;
+    }
     if (ci + 1 < chunks.length) fetchChunk(chunks[ci + 1]).catch(() => {});
     if (tok !== player.token) return;
     const an = analyze(buf);
@@ -802,7 +868,11 @@ function buildChunkTimeline(c, D) {
 }
 
 /* ---- transport ---- */
-function setStatus(s) { $('live').classList.toggle('on', player.state === 'playing'); $('btnPlay').textContent = player.state === 'playing' ? '◉ ' + (s || '방송 중') : '▶ 읽기'; }
+function setStatus(s) {
+  $('live').classList.toggle('on', player.state === 'playing' || ai.listening);
+  $('btnPlay').textContent = player.state === 'playing' ? '◉ ' + (s || (ai.on ? '대답 중 · 눌러서 끊기' : '방송 중'))
+    : ai.on ? (ai.listening ? '● 듣는 중…' : ai.busy ? '… 생각 중' : '🎤 말하기') : '▶ 읽기';
+}
 function onSentence(i, last = i) {
   const s = player.sentences[i]; st.mood = sentenceMood(s.text, ui.tone); st.curSi = i;
   st.subText = player.sentences.slice(i, last + 1); triggerBlink(.14); st.nodV -= .9; st.browPulse = .6;
@@ -820,14 +890,16 @@ function finishAll(tok) {
   st.mood = ui.tone === 'serious' ? 'serious' : 'bright'; setTimeout(() => { if (player.state === 'idle') st.mood = 'calm'; }, 2600);
   renderSub(-1, true);
   if (rec.mr && rec.mr.state === 'recording') setTimeout(() => rec.stop(), 900);
+  if (ai.on) aiAfterSpeak();
 }
-function startReading(fromIdx = 0) {
+/** text: optional text to speak instead of the script box (AI answers). eng: optional engine override. */
+function startReading(fromIdx = 0, textIn, engIn) {
   if (!avatar.ready) return toast('모델을 불러오는 중입니다.');
-  const text = $('script').value.trim(); if (!text) return toast('대본을 입력하세요.');
+  const text = (textIn != null ? textIn : $('script').value).trim(); if (!text) return toast('대본을 입력하세요.');
   stopAll(true);
-  player.sentences = splitSentences(text); player.idx = fromIdx; player.state = 'playing'; player.silentMode = false; const tok = ++player.token;
+  player.text = text; player.sentences = splitSentences(text); player.idx = fromIdx; player.state = 'playing'; player.silentMode = false; const tok = ++player.token;
   ensureAudio(); setStatus();
-  if (ui.eng === 'gemini') playGemini(tok);
+  if ((engIn || ui.eng) === 'gemini') playGemini(tok);
   else { if (synth) synth.cancel(); if (!synth || (!koVoices.length && !synth.getVoices().length)) toast('기기 TTS가 없어 입모양만 재생합니다.'); playDeviceSentence(fromIdx, tok); }
 }
 function stopAll(silent) {
@@ -848,7 +920,11 @@ function togglePause() {
 let lastSubKey = '';
 function renderSub(ci, reset) {
   const done = $('sub').firstElementChild, todo = $('sub').lastElementChild;
-  if (reset) { done.textContent = ''; todo.textContent = player.sentences.length ? '— 방송을 마쳤습니다 —' : '대본을 입력하고 ▶ 읽기를 누르세요.'; lastSubKey = ''; return; }
+  if (reset) {
+    lastSubKey = '';
+    if (ai.on) { done.textContent = player.text || ''; todo.textContent = player.text ? '' : '무엇이든 물어보세요.'; return; }
+    done.textContent = ''; todo.textContent = player.sentences.length ? '— 방송을 마쳤습니다 —' : '대본을 입력하고 ▶ 읽기를 누르세요.'; return;
+  }
   if (!st.subText) return;
   const full = st.subText.map(s => s.text).join(' ');
   const startAbs = st.subText[0].start; let cut = 0;
@@ -913,8 +989,22 @@ function update(dt, T) {
   if (st.test && T < st.testUntil) { for (const k of MORPHS) vis[k] = 0; Object.assign(vis, VIS[st.test] || {}); }
   st.speaking = speakingNow;
 
+  // --- AI conversation body language: attentive listening, thinking glance
+  let aiMood = null;
+  if (ai.on && player.state === 'idle') {
+    if (ai.mode === 'listen') {
+      aiMood = 'listen';
+      st.aiNodT = (st.aiNodT || 0) - dt;
+      if (st.aiNodT <= 0) { st.aiNodT = 1.8 + Math.random() * 2.4; if (ai.heard) st.nodV -= .35 + Math.random() * .35; }
+    } else if (ai.mode === 'think') {
+      aiMood = 'think';
+      st.aiThinkT = (st.aiThinkT || 0) - dt;
+      if (st.aiThinkT <= 0) { st.aiThinkT = .9 + Math.random() * 1.3; st.gaze.tx = .07 + Math.random() * .05; st.gaze.ty = -.05 - Math.random() * .03; st.gaze.next = 9; }
+    }
+  }
+
   // --- mood layer (slow)
-  const mood = st.testMood && T < st.testMoodUntil ? MOODS[st.testMood] : (MOODS[st.mood] || MOODS.calm);
+  const mood = st.testMood && T < st.testMoodUntil ? MOODS[st.testMood] : aiMood ? MOODS[aiMood] : (MOODS[st.mood] || MOODS.calm);
   for (const k of MORPHS) st.moodW[k] = lerp(st.moodW[k], mood[k] || 0, 1 - Math.exp(-dt / .35));
 
   // --- blinking
@@ -1088,8 +1178,11 @@ const SAMPLE = `안녕하십니까, 날씨 소식입니다.
 지금까지 날씨였습니다.`;
 $('btnSample').onclick = () => { $('script').value = SAMPLE; store.set('script2', SAMPLE); };
 $('btnClear').onclick = () => { $('script').value = ''; store.set('script2', ''); $('script').focus(); };
-$('btnPlay').onclick = () => { if (player.state === 'paused') togglePause(); else if (player.state === 'idle') startReading(0); };
-$('btnStop').onclick = () => stopAll();
+$('btnPlay').onclick = () => {
+  if (ai.on) return aiMicPress();
+  if (player.state === 'paused') togglePause(); else if (player.state === 'idle') startReading(0);
+};
+$('btnStop').onclick = () => { if (ai.on) aiHalt(); stopAll(); };
 $('btnPause').onclick = () => togglePause();
 $('btnRec').onclick = () => { if (rec.mr && rec.mr.state === 'recording') { stopAll(); rec.stop(); return; } if (rec.start()) startReading(0); };
 document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { st.test = b.dataset.v; st.testUntil = clockT.elapsedTime + 1.4; });
@@ -1097,12 +1190,245 @@ document.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
   const x = b.dataset.x; st.testX = x; st.testMoodUntil = clockT.elapsedTime + 1.6;
   if (x === 'blink') { st.testMood = null; triggerBlink(.16); st.testMoodUntil = clockT.elapsedTime + .01; } else st.testMood = x;
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden && player.state === 'playing' && ui.eng === 'device') stopAll(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) return;
+  if (ai.on) aiHalt();
+  if (player.state === 'playing' && ui.eng === 'device') stopAll();
+});
+
+/* =====================================================================
+   9. AI CONVERSATION (Gemini) — speak → recognise → answer → anchor reads it
+   ===================================================================== */
+const GAPI = 'https://generativelanguage.googleapis.com/v1beta';
+const SRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const IDLE_HINT = '🎤를 누르고 질문을 말씀하세요.';
+
+function aiSetState(t) { $('aiState').textContent = t; }
+function aiSetMode(m) {
+  const was = ai.mode; ai.mode = m;
+  if (was === 'think' && m !== 'think') { st.gaze.tx = 0; st.gaze.ty = 0; st.gaze.next = .4; }
+  if (m === 'listen') { st.gaze.tx = 0; st.gaze.ty = 0; st.gaze.next = .6; st.aiNodT = 1; }
+  $('aiMic').classList.toggle('on', ai.listening);
+  $('aiMic').classList.toggle('think', m === 'think');
+  setStatus();
+}
+function setSubLine(t) { $('sub').firstElementChild.textContent = ''; $('sub').lastElementChild.textContent = t; lastSubKey = ''; }
+function addMsg(who, text) {
+  const d = document.createElement('div'); d.className = 'msg ' + who; d.textContent = text;
+  const log = $('chatLog'); log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+}
+function aiErrText(m) {
+  m = String(m || '');
+  if (/API key not valid|API_KEY_INVALID|invalid api key/i.test(m)) return 'API 키가 올바르지 않습니다. 키를 다시 확인해 주세요.';
+  if (/PERMISSION_DENIED|permission/i.test(m)) return '이 키에 Gemini API 권한이 없습니다. AI Studio에서 새 키를 만들어 보세요.';
+  if (/quota|RESOURCE_EXHAUSTED|429|rate/i.test(m)) return '사용량 한도에 도달했습니다. 잠시 후 다시 시도하세요.';
+  if (/Failed to fetch|NetworkError|network/i.test(m)) return '네트워크에 연결할 수 없습니다.';
+  return m;
+}
+
+/* --- AI button: open key panel / turn everything off --- */
+function aiToggle() {
+  if (ai.on || ai.open) return aiClose();
+  ai.open = true;
+  $('aiPanel').classList.remove('hide'); $('aiSetup').classList.remove('hide'); $('aiTalk').classList.add('hide');
+  $('btnAI').classList.add('open'); $('aiErr').textContent = '';
+  $('aiKey').value = store.get('aiKey', '') || $('gemKey').value.trim();
+  $('aiPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (!$('aiKey').value) setTimeout(() => $('aiKey').focus(), 250);
+}
+function aiClose() {
+  const wasOn = ai.on;
+  ai.on = false; ai.open = false; aiHalt(); stopAll(true);
+  player.text = ''; player.sentences = [];
+  document.body.classList.remove('ai-on');
+  $('aiPanel').classList.add('hide'); $('btnAI').classList.remove('open', 'on');
+  aiSetMode('idle'); st.mood = 'calm'; renderSub(-1, true); setStatus();
+  if (wasOn) toast('AI 대화를 종료했습니다.');
+}
+
+/* --- key check + model choice --- */
+async function aiListModels(key) {
+  const res = await fetch(`${GAPI}/models?pageSize=1000`, { headers: { 'x-goog-api-key': key } });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + res.status));
+  return (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''));
+}
+function rankModels(names) {
+  const chat = names.filter(n => /^gemini-/.test(n) && !/(tts|image|live|audio|embed|vision|robotics|computer-use|aqa|learnlm|nano|banana|veo|lyria|native|gemma)/i.test(n));
+  const score = n => {
+    if (n === 'gemini-flash-latest') return 1e4;               // Google's always-current Flash alias
+    const v = parseFloat((n.match(/^gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+    let s = v * 10;
+    if (/flash/.test(n)) s += 50;                               // fast enough for live conversation
+    if (/lite/.test(n)) s -= 8;
+    if (/preview|exp/.test(n)) s -= 3;
+    if (/-\d{3}$|\d{2}-\d{2}/.test(n)) s -= 1;                  // dated snapshots after aliases
+    return s;
+  };
+  return chat.sort((a, b) => score(b) - score(a));
+}
+async function aiConnect() {
+  const key = $('aiKey').value.trim();
+  if (!key) { $('aiErr').textContent = 'API 키를 입력하세요.'; return; }
+  if (!avatar.ready) return toast('모델을 불러오는 중입니다.');
+  ensureAudio();                                               // unlock audio inside the tap
+  $('aiConnect').disabled = true; $('aiConnect').textContent = '확인 중…'; $('aiErr').textContent = '';
+  try {
+    const ranked = rankModels(await aiListModels(key));
+    if (!ranked.length) throw new Error('이 키로 쓸 수 있는 대화 모델이 없습니다.');
+    if (!ai.open) return;                                      // closed while checking
+    ai.key = key; ai.models = ranked; store.set('aiKey', key);
+    if (!$('gemKey').value.trim()) { $('gemKey').value = key; store.set('gemKey', key); }
+    const saved = store.get('aiModel', ''); ai.model = ranked.includes(saved) ? saved : ranked[0];
+    const sel = $('aiModel'); sel.textContent = '';
+    for (const n of ranked) { const o = document.createElement('option'); o.value = o.textContent = n; sel.appendChild(o); }
+    sel.value = ai.model;
+    aiStart();
+  } catch (e) { $('aiErr').textContent = '연결 실패: ' + aiErrText(e.message); }
+  finally { $('aiConnect').disabled = false; $('aiConnect').textContent = '연결'; }
+}
+function aiStart() {
+  ai.on = true; ai.history = []; ai.retry = 0; $('chatLog').textContent = '';
+  document.body.classList.add('ai-on'); $('btnAI').classList.remove('open'); $('btnAI').classList.add('on');
+  $('aiSetup').classList.add('hide'); $('aiTalk').classList.remove('hide');
+  toast('AI와 대화를 시작합니다');
+  const hello = 'AI와 대화를 시작합니다. 무엇이든 편하게 물어보세요.';
+  addMsg('ai', hello); aiSetState('인사하는 중…'); aiSetMode('speak');
+  startReading(0, hello);
+}
+
+/* --- listening (Web Speech API, Korean) --- */
+function aiListen(auto) {
+  if (!ai.on || ai.busy || ai.listening || player.state !== 'idle') return;
+  if (!SRec) { aiSetState('이 브라우저는 음성 인식을 지원하지 않습니다. 아래 칸에 글로 입력하세요.'); return; }
+  if (!auto) ai.retry = 0;
+  const r = new SRec(); r.lang = 'ko-KR'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+  let fin = '', interim = '', err = '';
+  ai.heard = false;
+  r.onresult = e => {
+    interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t; else interim += t; }
+    ai.heard = true; setSubLine('🎙 ' + (fin + interim).trim()); aiSetState('듣는 중… 말이 끝나면 자동으로 답합니다.');
+  };
+  r.onerror = e => { err = e.error; };
+  r.onend = () => {
+    if (ai.rec !== r) return;
+    ai.rec = null; ai.listening = false;
+    if (!ai.on) return;
+    const q = (fin || interim).trim();
+    if (q && !r._cancel) { ai.retry = 0; aiSubmit(q); return; }
+    aiSetMode('idle');
+    if (err === 'not-allowed' || err === 'service-not-allowed') { aiSetState('마이크 권한이 필요합니다. 권한을 허용한 뒤 🎤를 누르세요.'); setSubLine('마이크 권한이 필요합니다.'); return; }
+    if (!r._cancel && ai.hands && (!err || err === 'no-speech') && ai.retry < 2) { ai.retry++; setTimeout(() => aiListen(true), 250); return; }
+    aiSetState(IDLE_HINT); renderSub(-1, true);
+  };
+  try { r.start(); } catch (e) { aiSetState('음성 인식을 시작하지 못했습니다: ' + e.message); return; }
+  ai.rec = r; ai.listening = true; aiSetMode('listen');
+  aiSetState('듣고 있어요. 말씀하세요…'); setSubLine('🎙 듣는 중…');
+}
+function aiStopListen(cancel) {
+  const r = ai.rec; if (!r) return;
+  r._cancel = !!cancel; try { cancel ? r.abort() : r.stop(); } catch (e) {}
+}
+/** Stop listening / thinking (not the voice). */
+function aiHalt() {
+  ai.qTok = (ai.qTok || 0) + 1;
+  try { ai.ctrl && ai.ctrl.abort(); } catch (e) {}
+  ai.busy = false;
+  aiStopListen(true); ai.rec = null; ai.listening = false;
+  aiSetMode('idle'); if (ai.on) aiSetState(IDLE_HINT);
+}
+function aiMicPress() {
+  if (!ai.on) return;
+  if (ai.listening) return aiStopListen(false);               // tap again = "I'm done talking"
+  if (ai.busy) aiHalt();
+  if (player.state !== 'idle') stopAll(true);                 // barge in: cut her off and listen
+  aiListen(false);
+}
+function aiAfterSpeak() {
+  aiSetMode('idle');
+  if (ai.hands) { aiSetState('곧 다시 듣습니다…'); setTimeout(() => { if (ai.on && player.state === 'idle' && !ai.busy && !ai.listening) aiListen(true); }, 450); }
+  else aiSetState(IDLE_HINT);
+}
+
+/* --- thinking (Gemini generateContent) --- */
+function aiSystem() {
+  const d = new Date();
+  return [
+    '당신은 K-ANCHOR의 AI 아나운서 "하나(HANA)"입니다. 지금 사용자와 얼굴을 마주 보고 음성으로 실시간 대화하고 있습니다.',
+    `오늘은 ${d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}, 현재 시각은 ${d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}입니다.`,
+    '답변은 그대로 소리 내어 읽힙니다. 마크다운, 목록 기호, 표, 이모지, 링크, 괄호 속 부연 설명을 쓰지 마세요.',
+    '방송 아나운서처럼 또렷하고 따뜻한 존댓말 구어체로, 핵심부터 보통 2~4문장, 길어도 6문장 이내로 말하세요. 사용자가 자세히 원할 때만 길게 설명하세요.',
+    '음성 인식 때문에 질문이 조금 어색해도 가장 그럴듯한 뜻으로 이해하고 답하세요.',
+    ai.search ? '최신 정보가 필요하면 검색 결과를 바탕으로 정확하게 답하세요.' : '확인할 수 없는 최신 소식이나 실시간 정보는 지어내지 말고, 정확히 알 수 없다고 솔직하게 말하세요.',
+  ].join('\n');
+}
+function cleanSpoken(t) {
+  return String(t || '')
+    .replace(/```[\s\S]*?```/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '')
+    .replace(/^\s{0,3}(#{1,6}|[-*•·]|\d+[.)])\s+/gm, '').replace(/[*_`~#>|]/g, '')
+    .replace(/\p{Extended_Pictographic}|️/gu, '').replace(/[ \t]+/g, ' ').replace(/ +([.,!?])/g, '$1').replace(/\n{2,}/g, '\n').trim();
+}
+async function aiGenerate(q) {
+  const userTurn = { role: 'user', parts: [{ text: q }] };
+  let hist = ai.history.slice(-18); while (hist.length && hist[0].role !== 'user') hist.shift();
+  const ctrl = ai.ctrl = new AbortController();
+  const body = { systemInstruction: { parts: [{ text: aiSystem() }] }, contents: [...hist, userTurn],
+    generationConfig: { temperature: .8, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } } };
+  if (ai.search) body.tools = [{ google_search: {} }];
+  const post = async () => {
+    const res = await fetch(`${GAPI}/models/${encodeURIComponent(ai.model)}:generateContent`, { method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': ai.key }, body: JSON.stringify(body) });
+    return { res, j: await res.json().catch(() => ({})) };
+  };
+  let { res, j } = await post();
+  const msg = () => (j.error && j.error.message) || '';
+  if (res.status === 400 && /thinking|budget/i.test(msg())) { delete body.generationConfig.thinkingConfig; ({ res, j } = await post()); }   // model that must think
+  if (res.status === 400 && body.tools) { delete body.tools; ({ res, j } = await post()); }                                               // model without search
+  if (!res.ok) throw new Error(msg() || ('HTTP ' + res.status));
+  const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
+  const text = cleanSpoken(parts.filter(p => !p.thought && typeof p.text === 'string').map(p => p.text).join(''));
+  if (!text) throw new Error(j.promptFeedback && j.promptFeedback.blockReason ? '이 질문에는 답할 수 없습니다.' : '빈 답변을 받았습니다. 다시 말씀해 주세요.');
+  ai.history = [...hist, userTurn, { role: 'model', parts: [{ text }] }];
+  return text;
+}
+async function aiSubmit(q) {
+  if (!ai.on) return;
+  const tok = ai.qTok = (ai.qTok || 0) + 1;
+  addMsg('me', q); ai.busy = true; aiSetMode('think'); aiSetState('생각하는 중…'); setSubLine('🎙 ' + q);
+  let ans;
+  try { ans = await aiGenerate(q); }
+  catch (e) {
+    if (tok !== ai.qTok) return;
+    ai.busy = false; aiSetMode('idle');
+    if (e.name === 'AbortError') return;
+    addMsg('err', '오류: ' + aiErrText(e.message)); aiSetState('🎤를 눌러 다시 말씀하세요.'); setSubLine('답변을 가져오지 못했습니다.'); return;
+  }
+  if (tok !== ai.qTok || !ai.on) return;
+  ai.busy = false; addMsg('ai', ans); aiSetMode('speak'); aiSetState('대답하는 중… 🎤를 누르면 끊고 말할 수 있어요.');
+  startReading(0, ans);
+}
+
+/* --- wiring --- */
+$('btnAI').onclick = aiToggle;
+$('aiConnect').onclick = aiConnect;
+$('aiKey').addEventListener('keydown', e => { if (e.key === 'Enter') aiConnect(); });
+$('aiMic').onclick = aiMicPress;
+function aiSendText() { const v = $('aiText').value.trim(); if (!v || !ai.on) return; $('aiText').value = ''; aiHalt(); if (player.state !== 'idle') stopAll(true); aiSubmit(v); }
+$('aiSend').onclick = aiSendText;
+$('aiText').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) aiSendText(); });
+ai.hands = store.get('aiHands', 'on') === 'on'; $('aiHands').checked = ai.hands;
+$('aiHands').onchange = e => { ai.hands = e.target.checked; store.set('aiHands', ai.hands ? 'on' : 'off'); };
+ai.search = store.get('aiSearch', 'off') === 'on'; $('aiSearch').checked = ai.search;
+$('aiSearch').onchange = e => { ai.search = e.target.checked; store.set('aiSearch', ai.search ? 'on' : 'off'); };
+$('aiModel').onchange = e => { ai.model = e.target.value; store.set('aiModel', ai.model); };
+$('aiReset').onclick = () => { ai.history = []; $('chatLog').textContent = ''; toast('대화 기록을 지웠습니다.'); };
 
 /* test hook (used by automated checks) */
 window.__anchor = { buildTimeline, splitSentences, numKo, sampleTimeline, alignTimeline, sentenceMood, face, st, player, VIS,
   setTest(v, mood) { st.test = v; st.testUntil = 1e9; st.testMood = mood || null; st.testMoodUntil = mood ? 1e9 : 0; },
-  setCam, startReading, stopAll, camera, scene, get avatar() { return avatar; } };
+  setCam, startReading, stopAll, camera, scene, get avatar() { return avatar; },
+  ai, aiToggle, aiConnect, aiSubmit, aiMicPress, aiClose, rankModels, cleanSpoken };
 </script>
 </body>
 </html>
