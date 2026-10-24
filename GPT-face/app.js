@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import {GLTFLoader} from './vendor/GLTFLoader.js';
 import {OrbitControls} from './vendor/OrbitControls.js';
-import {CharacterRig,ACTIONS,YOGA,parseCommand} from './rig.js';
+import {CharacterRig,ACTIONS,YOGA,parseCommand} from './rig.js?v=render-fix-3';
 import {LiveVoice,DEFAULT_MODEL} from './live.js';
 const $=id=>document.getElementById(id);
+let renderRecovered=false;
 let rig,avatar,renderer,viewGoal,apiKey='',modelName=DEFAULT_MODEL,voice='Kore',frame=0;
 const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(33,1,.01,100),viewport=$('viewport'),clock=new THREE.Clock();
 const notice=t=>$('notice').textContent=t;
@@ -33,5 +34,5 @@ $('importMotion').onchange=async e=>{const file=e.target.files[0];if(!file||!rig
 window.addEventListener('pagehide',()=>{live.close();apiKey='';});
 const waveform=new Float32Array(1024),spectrum=new Uint8Array(512);
 function animate(){requestAnimationFrame(animate);const dt=Math.min(clock.getDelta(),.05),k=1-Math.exp(-dt*6);if(viewGoal){camera.position.lerp(viewGoal.p,k);controls.target.lerp(viewGoal.t,k);}controls.update();let volume=0,round=0;if(live.analyser&&live.speaking&&!live.userActive){live.analyser.getFloatTimeDomainData(waveform);volume=Math.sqrt(waveform.reduce((a,b)=>a+b*b,0)/waveform.length);live.analyser.getByteFrequencyData(spectrum);let low=0,high=0;for(let i=3;i<16;i++)low+=spectrum[i];for(let i=20;i<65;i++)high+=spectrum[i];round=low/(low+high+1);}
- rig?.update(dt,camera,{open:Math.min(.42,Math.max(0,volume-.006)*5),round:Math.min(.25,volume*round*3)});if(frame++%3===0){document.querySelectorAll('#wave i').forEach((el,i)=>el.style.height=4+(live.speaking?volume*150*(.6+Math.sin(clock.elapsedTime*12+i)*.4):live.userActive?6:0)+'px');$('poseStatus').textContent=rig?(ACTIONS[rig.pose]||rig.pose)+(rig.frozen?' · 유지 중':''):'';}renderer?.render(scene,camera);}
+ rig?.update(dt,camera,{open:Math.min(.42,Math.max(0,volume-.006)*5),round:Math.min(.25,volume*round*3)});if(frame++%3===0){document.querySelectorAll('#wave i').forEach((el,i)=>el.style.height=4+(live.speaking?volume*150*(.6+Math.sin(clock.elapsedTime*12+i)*.4):live.userActive?6:0)+'px');$('poseStatus').textContent=rig?(ACTIONS[rig.pose]||rig.pose)+(rig.frozen?' · 유지 중':''):'';}if(renderer){try{renderer.render(scene,camera);}catch(error){console.error('Tasha render failure',error);if(!renderRecovered&&rig){renderRecovered=true;for(const mesh of rig.faces){mesh.morphTargetInfluences?.fill(0);mesh.geometry.morphAttributes={};mesh.updateMorphTargets();for(const material of Array.isArray(mesh.material)?mesh.material:[mesh.material])material.needsUpdate=true;}rig.faces=[];notice('표정 효과에서 오류가 발생해 기본 얼굴로 복구했습니다. 새로고침해 주세요.');}else{renderer.domElement.hidden=true;$('loading').hidden=false;$('loading').textContent='3D 화면을 그리지 못했습니다. 페이지를 새로고침해 주세요.';renderer=null;}}}}
 animate();

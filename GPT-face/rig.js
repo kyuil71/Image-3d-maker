@@ -32,7 +32,7 @@ export class CharacterRig {
     if(name==='blink'){const cx=.0595,cy=2.980,edge=1-smooth(.022,.042,Math.abs(ax-cx));const vertical=1-smooth(.022,.055,Math.abs(y-cy));const w=edge*vertical*front;dy=(cy-y)*w;dz=.003*w;if(mesh.name==='eyelashes'){const ew=edge*(1-smooth(.035,.06,Math.abs(y-cy)));dy=(cy-y)*ew;dz=.001*ew;}}
     arr[i*3]=dx;arr[i*3+1]=dy;arr[i*3+2]=dz;
    }targets[name]=new T.Float32BufferAttribute(arr,3);}
-   geo.morphAttributes.position=Object.values(targets);geo.morphAttributes.normal=[];geo.morphTargetsRelative=true;mesh.updateMorphTargets();mesh.morphTargetDictionary=Object.fromEntries(Object.keys(targets).map((n,i)=>[n,i]));this.faces.push(mesh);
+   geo.morphAttributes.position=Object.values(targets);delete geo.morphAttributes.normal;geo.morphTargetsRelative=true;mesh.updateMorphTargets();mesh.morphTargetDictionary=Object.fromEntries(Object.keys(targets).map((n,i)=>[n,i]));this.faces.push(mesh);
   }
  }
  action(name,duration=8,intensity=.6,side){if(!(name in ACTIONS))return {ok:false,message:'지원하지 않는 동작입니다.'};if(name==='mixamo'&&!this.mixamoClip)return {ok:false,message:'먼저 Mixamo FBX 파일을 불러와 주세요.'};duration=clamp(Number(duration)||8,1,120);this.strength=clamp(Number(intensity)||.6,.1,1);

@@ -39,3 +39,6 @@ Mixamo 로그인이 필요한 카탈로그에서 요가 원본 파일을 확보�
 - https://ai.google.dev/gemini-api/docs/models/gemini-3.8-live
 - https://helpx.adobe.com/creative-cloud/help/mixamo-rigging-animation.html
 - https://github.com/mrdoob/three.js/blob/r170/LICENSE
+
+## 2026-10-24 렌더링 오류 수정
+눈과 입만 보이는 문제는 prepareFace가 morphAttributes.normal을 빈 배열로 남겨 Three.js WebGLMorphtargets의 텍스처 구성 중 undefined 법선 접근 예외를 발생시킨 것이 원인이었습니다. 이 속성을 삭제하여 존재하지 않는 법선 타깃을 사용하지 않도록 수정했습니다. 제공된 Three.js r170 내부의 실제 morph texture packing 함수를 이용해 이전 코드의 예외를 재현하고 수정 후 실제 모델이 2048px 텍스처 제한에서도 처리되는 것을 확인했습니다. 총 8개 검사가 통과했습니다. 재발 시에는 표정 효과를 해제해 기본 모델로 복구하고 안내를 표시합니다. 모바일 캐시가 이전 코드를 유지하지 않도록 앱 및 rig 모듈 URL의 버전도 갱신했습니다. 실기기 GPU의 시각 확인은 아직 미완료입니다.
