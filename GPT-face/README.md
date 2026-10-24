@@ -1,35 +1,41 @@
-# GPT-face · Tasha 음성 대화
+# Tasha · Gemini Live 음성 캐릭터
 
-이 폴더를 `kyuil71/Image-3d-maker` 저장소의 `GPT-face` 경로에 넣으면 기존 GitHub Pages 배포 설정 아래에서 사용할 수 있습니다.
+실행: https://kyuil71.github.io/Image-3d-maker/GPT-face/
 
-예상 실행 주소: https://kyuil71.github.io/Image-3d-maker/GPT-face/
+## 사용
+연결 설정에서 본인의 Gemini API 키를 입력하고 설정 적용 → 마이크로 대화 시작을 누릅니다. 기본 모델은 `gemini-3.8-live`, 음성은 Kore입니다. 모델 접근 권한에 따라 설정의 모델명을 변경할 수 있습니다. API 사용료는 Gemini 앱 구독과 별도입니다.
 
-## 사용법
-1. 페이지를 열고 `연결 설정`을 누릅니다.
-2. 본인의 OpenAI API 키를 입력하고 `설정 적용`을 누릅니다.
-3. `마이크로 대화 시작`을 누르고 마이크 사용을 허용합니다.
-4. “고개를 숙여 주세요”, “왼쪽을 봐 주세요”, “오른팔을 올려 주세요”, “웃으면서 손을 흔들어 주세요”처럼 요청해 보세요.
+- Google Search 도구와 perform_action 함수를 Live 세션에 함께 등록합니다. 최신 정보 질문에는 검색을 요청하며 반환된 출처 및 Google 검색 제안을 표시합니다.
+- 마이크 입력은 echo cancellation 적용 후 AudioWorklet에서 16 kHz PCM으로 변환합니다. 80ms 발화 감지와 320ms 선행 버퍼, 850ms 침묵 구간으로 발화 경계를 판단합니다. 말하기 시작하면 예약된 출력 음성 전체를 중단하고 Gemini에 activityStart를 전송합니다. 음성 출력은 24 kHz PCM이며 음성 분석에 맞춰 입을 움직입니다.
+- API 키는 탭의 메모리에서만 사용하고 저장하거나 GitHub에 업로드하지 않습니다. 개인용 BYOK 방식으로 Google WebSocket에 직접 연결합니다. 사용자 카메라는 사용하지 않습니다.
+- 길어진 대화는 sliding-window context compression을 사용합니다. 서버의 세션 종료 예고는 화면에 표시합니다. 연결 종료 후에는 다시 연결해야 합니다.
 
-원본에 없던 표정 키·관절을 추가한 프로토타입입니다. 사람과 동일한 얼굴 근육 표현이나 전문적인 발음별 립싱크는 아닙니다. 입은 출력 음성의 크기·주파수에 반응합니다. 일부 의상·관절 변형이 자연스럽지 않을 수 있습니다.
+## 표정·시선·관절
+원본 캐릭터의 외형과 텍스처는 유지합니다. 원래 10개였던 관절에 허벅지·정강이·발을 추가해 16개로 확장합니다. 팔·다리는 2관절 IK로 목표 지점을 따라가며 자세 전환은 보간합니다. 손가락 관절과 의상 물리 시뮬레이션은 없습니다.
 
-실제 유료 API 키가 없어 음성 대화·말 끊기·동작 인식의 실통화 검증은 하지 못했습니다. 이벤트 처리의 코드 검사와 Blender 모델 렌더링은 수행했습니다. 검증용 브라우저의 WebGL 가속이 비활성화되어 실시간 3D 재생은 확인하지 못했습니다. Chrome/Edge에서 하드웨어 가속을 활성화해 주세요.
+미소·볼·입꼬리 내림·안쪽 눈썹·눈썹 올림·눈꺼풀을 별개 변형으로 제어합니다. 눈 메시에는 표정 변형을 적용하지 않고 두 눈의 중심을 기준으로 회전합니다. 시선은 화면 카메라를 향하며 사용자 얼굴을 추적하는 기능은 아닙니다. 요가에서는 자세 정렬을 우선합니다. 표정에는 음수 가중치를 사용하지 않습니다.
 
-왼쪽·오른쪽은 캐릭터 본인 기준입니다. 동작은 보통 4초 뒤 원래 자세로 돌아오며, 음성으로 최대 12초까지 요청할 수 있습니다. 헤드폰을 사용하면 출력 음성이 마이크에 들어가는 오작동을 줄일 수 있습니다.
+입은 실제 재생 중인 음성의 크기와 주파수를 분석한 근사 립싱크입니다. 음소 타임스탬프와 정밀 viseme를 제공하는 시스템은 아니며, 전문 얼굴 리깅 수준의 사실적인 웃음·울음이나 눈물 표현은 아닙니다. 원본 의상·손가락·얼굴 구조 때문에 일부 자세와 표정에는 한계가 있습니다.
 
-## API 키
-별도 서버 없이 GitHub Pages에서 실행하는 개인용 BYOK 버전입니다. 키는 입력한 탭의 메모리에만 보관하고 OpenAI의 세션 발급 API에 직접 전송합니다. 파일·로컬 저장소·GitHub에 저장하지 않습니다. 이후 단기 키로 OpenAI Realtime API와 연결합니다. 브라우저 내에서 키를 사용하는 방식이므로 본인 키로 사용하는 개인용 실행판으로 취급해 주세요. 다수 사용자를 대상으로 운영할 때에는 서버에서 단기 키를 발급하는 방식으로 바꾸는 것이 적합합니다.
+## 요가·Mixamo
+기본 8개(산·나무·전사 1/2·의자·다운독·코브라·아기)는 이 프로젝트에서 직접 작성한 관절 애니메이션입니다. Mixamo에서 다운로드한 요가 동작이 아닙니다. 운동 지도를 대신하는 정확한 자세 데이터가 아닙니다.
 
-ChatGPT 구독과 별도로 OpenAI API 요금이 발생합니다. 음성은 OpenAI로 전송됩니다. 사용자 카메라는 사용하지 않으며 사용자의 얼굴을 분석하지 않습니다.
+“나무 자세를 10초 해 주세요”, “반대쪽으로 해 주세요”, “멈춰 주세요”, “바로 서 주세요”로 제어합니다. 1~120초 유지가 가능하며 보간 진입 시간 1.8초를 추가합니다. 음성 끼어들기는 자세를 해제하지 않습니다. “멈춰”는 현재 자세를 유지하고 “그만하고 서”는 중립으로 돌아옵니다.
 
-## 파일
-- index.html / style.css / app.js: 화면 및 대화·동작 제어
-- tasha.glb: 원본에서 변환하고 표정·관절을 추가한 모델
-- vendor/: Three.js r170 및 GLTFLoader, OrbitControls, BufferGeometryUtils
-- portrait.jpg: WebGL 미지원 환경의 정적 안내 이미지
+Mixamo 로그인이 필요한 카탈로그에서 요가 원본 파일을 확보하지 못했습니다. 본인이 사용 권한을 가진 Mixamo FBX를 선택하면 16개 관절에 retargetClip으로 변환합니다. FBX는 기기에서만 처리하며 서버에 보내지 않습니다. Without Skin, 40MB 이하, 120초 이하 동작을 권장합니다. 골격 비율이 다르면 정렬·손가락·의상 보정이 추가로 필요합니다. 원본 Mixamo 파일을 제공하지 않으므로 변환의 실파일 검증은 미완료입니다.
 
-Three.js는 MIT License입니다: https://github.com/mrdoob/three.js/blob/r170/LICENSE
-캐릭터의 이용 권리는 업로드한 원본 모델의 라이선스를 따릅니다.
+## 검증 (2026-10-24)
+- `npm test`: 6개 검사 통과. 실제 GLB의 스킨 가중치 정규화·관절 유효성·8개 요가 및 표정 유한값, 한국어 명령, PCM 변환, 끼어들기 출력 제거, 취소된 도구와 중복 도구 실행 차단을 검사합니다.
+- Three.js로 실제 모델의 변형 정점을 계산해 별도 정적 투영으로 중립·나무·다운독·아기 자세를 점검했습니다. 손가락이 다리 가중치에 섞이는 문제와 다운독의 손 목표 거리 문제를 수정했습니다.
+- 브라우저에서 모델 로딩·Gemini 설정 UI를 확인했습니다. 검증 브라우저의 WebGL이 비활성화되어 실시간 3D 렌더링·모바일 실기기의 시각 검증은 하지 못했습니다.
+- 실제 API 키가 없어 유료 Gemini 음성 통화·검색·음성 명령 인식은 실서비스로 검증하지 못했습니다. 관련 검사는 이벤트와 코드 수준입니다.
 
-OpenAI 공식 문서:
-https://developers.openai.com/api/docs/guides/voice-webrtc
-https://developers.openai.com/api/docs/guides/realtime-conversations
+테스트의 실제 GLB는 model.json에 나열된 조각을 이어 붙인 뒤 gzip 해제하여 tasha.glb로 준비합니다. 모델과 캐릭터의 권리는 업로드한 원본 라이선스를 따릅니다. Three.js r170, FBXLoader, SkeletonUtils, fflate는 각 파일 및 upstream 라이선스를 따릅니다.
+
+공식 문서:
+- https://ai.google.dev/api/live
+- https://ai.google.dev/gemini-api/docs/live-api/tools
+- https://ai.google.dev/gemini-api/docs/live-api/capabilities
+- https://ai.google.dev/gemini-api/docs/models/gemini-3.8-live
+- https://helpx.adobe.com/creative-cloud/help/mixamo-rigging-animation.html
+- https://github.com/mrdoob/three.js/blob/r170/LICENSE

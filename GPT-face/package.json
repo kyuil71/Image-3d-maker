@@ -1,0 +1,1 @@
+{"private":true,"type":"module","scripts":{"test":"node --experimental-loader ./tests/loader.mjs --test ./tests/*.test.mjs"}}
