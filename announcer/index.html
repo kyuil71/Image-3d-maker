@@ -117,6 +117,9 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
 .chk{display:flex;align-items:center;gap:8px;margin:10px 0 0;color:var(--sub);font-size:16px}
 .chk input{width:20px;height:20px;accent-color:var(--accent)}
 body.ai-on #cardScript,body.ai-on #cardRec{display:none}
+.msg.cut{opacity:.72}
+.msg .act{display:block;color:var(--accent2);font-size:16px;margin-bottom:2px}
+.hint{color:var(--sub);font-size:16px;margin-top:8px;line-height:1.5}
 </style>
 <script type="importmap">
 {"imports":{
@@ -168,8 +171,12 @@ body.ai-on #cardScript,body.ai-on #cardRec{display:none}
         <input type="text" id="aiText" placeholder="글로 물어봐도 됩니다" enterkeyhint="send">
         <button id="aiSend" style="flex:0 0 auto">보내기</button>
       </div>
+      <div class="hint">말로 시켜 보세요: "오른쪽 봐" · "고개 숙여" · "웃어봐" · "울어봐" · "입 다물어" · "윙크해" · "원래대로"<br>
+        대답 도중에 말하면 HANA가 멈추고 이어서 같이 답합니다.</div>
+      <button id="aiCtlReset" style="margin-top:8px;width:100%">표정 · 자세 원래대로</button>
       <details style="margin-top:10px"><summary>대화 설정</summary>
         <label class="chk"><input type="checkbox" id="aiHands" checked>대답이 끝나면 자동으로 다시 듣기</label>
+        <label class="chk"><input type="checkbox" id="aiBarge" checked>대답 도중 끼어들기 (스피커 소리에 자꾸 끊기면 끄거나 이어폰 사용)</label>
         <label class="chk"><input type="checkbox" id="aiSearch">실시간 Google 검색으로 답하기 (조금 느림)</label>
         <label for="aiModel">대화 모델</label>
         <select id="aiModel"></select>
@@ -416,6 +423,79 @@ const MOODS = {
   listen:   { mouthSmileL: .24, mouthSmileR: .24, browUp: .12, eyeSquint: .06 },
   think:    { browInnerUp: .32, browUp: .1, mouthPress: .18, mouthSmileL: .06, mouthSmileR: .02 },
 };
+/* ---- commanded face control (AI "오른쪽 봐", "웃어봐", …) ----
+   Held states persist until changed; left/right are screen directions (screen right = world +X). */
+const EXPR = {   // blend-shape weights may exceed 1: this model's smile/frown/brow shapes are shallow
+  smile:    { mouthSmileL: 1.5, mouthSmileR: 1.5, eyeSquint: .6, browUp: .15, upperLipUp: .12, mouthWide: .12 },
+  laugh:    { mouthSmileL: 1.75, mouthSmileR: 1.75, jawOpen: .34, upperLipUp: .38, lowerLipDown: .22, eyeSquint: 1, browUp: .3, mouthWide: .18 },
+  shy:      { mouthSmileL: .95, mouthSmileR: .7, eyeSquint: .35, browInnerUp: .6, mouthPress: .25 },
+  sad:      { browInnerUp: 1.5, mouthFrown: 1.4, browDown: .12, mouthPress: .25 },
+  cry:      { browInnerUp: 1.75, mouthFrown: 1.7, eyeSquint: .6, eyeBlinkL: -.05, eyeBlinkR: -.05, mouthPress: .15, jawOpen: .07, lowerLipDown: .3 },
+  angry:    { browDown: 1.6, mouthFrown: .8, mouthPress: .8, eyeSquint: .6 },
+  surprise: { browUp: 1.6, browInnerUp: .55, jawOpen: .45, mouthPucker: .25, upperLipUp: .15, eyeBlinkL: -.3, eyeBlinkR: -.3 },
+};
+const EXPR_POST = { sad: { hx: .12, ex: .12 }, cry: { hx: .17, ex: .14 }, shy: { hx: .14, ex: .18, hz: .06 }, angry: { hx: .07 }, surprise: { hx: -.05 }, laugh: { hx: -.04 } };
+const ctl = { h: { x: 0, y: 0, z: 0 }, e: { x: 0, y: 0 }, expr: null, mouth: null, eyes: null, osc: [], wink: null, laughLeft: 0,
+  cur: { hx: 0, hy: 0, hz: 0, ex: 0, ey: 0 }, o: { x: 0, y: 0, z: 0 } };
+const osc = (axis, amp, f, dur) => ctl.osc.push({ axis, amp, f, dur, t: 0 });
+const ACTS = {
+  look_left:       { ko: '왼쪽 보기',      f: k => { ctl.h.y = -.3 * k; ctl.e.y = -.22; } },
+  look_right:      { ko: '오른쪽 보기',    f: k => { ctl.h.y = .3 * k; ctl.e.y = .22; } },
+  look_up:         { ko: '위 보기',        f: k => { ctl.h.x = -.2 * k; ctl.e.x = -.2; } },
+  look_down:       { ko: '아래 보기',      f: k => { ctl.h.x = .24 * k; ctl.e.x = .22; } },
+  look_front:      { ko: '정면 보기',      f: () => { ctl.h.x = ctl.h.y = ctl.h.z = 0; ctl.e.x = ctl.e.y = 0; } },
+  eyes_left:       { ko: '눈만 왼쪽',      f: k => { ctl.e.y = -.28 * Math.min(k, 1.4); } },
+  eyes_right:      { ko: '눈만 오른쪽',    f: k => { ctl.e.y = .28 * Math.min(k, 1.4); } },
+  eyes_up:         { ko: '눈만 위',        f: k => { ctl.e.x = -.2 * Math.min(k, 1.4); } },
+  eyes_down:       { ko: '눈만 아래',      f: k => { ctl.e.x = .22 * Math.min(k, 1.4); } },
+  head_down:       { ko: '고개 숙이기',    f: k => { ctl.h.x = .36 * k; ctl.e.x = .1; } },
+  head_up:         { ko: '고개 들기',      f: k => { ctl.h.x = -.3 * k; ctl.e.x = -.08; } },
+  head_turn_left:  { ko: '고개 왼쪽으로',  f: k => { ctl.h.y = -.5 * k; ctl.e.y = 0; } },
+  head_turn_right: { ko: '고개 오른쪽으로', f: k => { ctl.h.y = .5 * k; ctl.e.y = 0; } },
+  head_tilt_left:  { ko: '고개 왼쪽 갸웃', f: k => { ctl.h.z = .24 * k; } },
+  head_tilt_right: { ko: '고개 오른쪽 갸웃', f: k => { ctl.h.z = -.24 * k; } },
+  nod:             { ko: '끄덕',           f: k => osc('x', .17 * Math.min(k, 1.3), 2.2, 1.5) },
+  shake:           { ko: '도리도리',       f: k => osc('y', .24 * Math.min(k, 1.3), 2.4, 1.7) },
+  smile:           { ko: '웃기',           f: () => { ctl.expr = 'smile'; } },
+  laugh:           { ko: '크게 웃기',      f: () => { ctl.expr = 'laugh'; ctl.laughLeft = 2.8; } },
+  shy:             { ko: '수줍게',         f: () => { ctl.expr = 'shy'; } },
+  sad:             { ko: '슬픈 표정',      f: () => { ctl.expr = 'sad'; } },
+  cry:             { ko: '울기',           f: () => { ctl.expr = 'cry'; } },
+  angry:           { ko: '화난 표정',      f: () => { ctl.expr = 'angry'; } },
+  surprise:        { ko: '놀란 표정',      f: () => { ctl.expr = 'surprise'; } },
+  wink:            { ko: '윙크',           f: () => { ctl.wink = { t: 0 }; } },
+  blink:           { ko: '깜박',           f: () => triggerBlink(.16) },
+  eyes_close:      { ko: '눈 감기',        f: () => { ctl.eyes = 'close'; } },
+  eyes_open:       { ko: '눈 뜨기',        f: () => { ctl.eyes = null; } },
+  mouth_open:      { ko: '입 벌리기',      f: () => { ctl.mouth = 'open'; } },
+  mouth_close:     { ko: '입 다물기',      f: () => { ctl.mouth = 'close'; } },
+  pout:            { ko: '뽀뽀 입',        f: () => { ctl.mouth = 'pucker'; } },
+  neutral:         { ko: '표정 원래대로',  f: () => { ctl.expr = null; ctl.mouth = null; ctl.eyes = null; } },
+  reset:           { ko: '원래대로',       f: () => ctlReset() },
+};
+function ctlReset() { ctl.h.x = ctl.h.y = ctl.h.z = 0; ctl.e.x = ctl.e.y = 0; ctl.expr = ctl.mouth = ctl.eyes = null; ctl.osc = []; ctl.wink = null; }
+/** Pull [[동작: a, b:2]] tags out of a model reply. */
+function parseActs(raw) {
+  const acts = [];
+  const text = String(raw || '').replace(/\[\[\s*(?:동작|actions?|acts?)?\s*[:：]?\s*([^\]]*)\]\]/gi, (_, list) => {
+    for (const tk of list.split(/[,\s]+/)) {
+      const m = tk.trim().toLowerCase().match(/^([a-z_]+)(?::([1-3]))?$/);
+      if (m && ACTS[m[1]]) acts.push({ id: m[1], n: +(m[2] || 1) });
+    }
+    return ' ';
+  });
+  return { acts, text };
+}
+/** hasSpeech: a spoken reply without mouth/eye commands releases those holds (she can't talk with her mouth held). */
+function applyActs(acts, hasSpeech) {
+  const ids = new Set(acts.map(a => a.id));
+  if (hasSpeech && ![...ids].some(i => /^(mouth_|pout)/.test(i))) ctl.mouth = null;
+  if (hasSpeech && !ids.has('eyes_close')) ctl.eyes = null;
+  for (const a of acts) ACTS[a.id].f([1, 1.4, 1.75][a.n - 1] || 1);
+  ctl.h.x = clamp(ctl.h.x, -.65, .65); ctl.h.y = clamp(ctl.h.y, -.8, .8); ctl.h.z = clamp(ctl.h.z, -.45, .45);
+}
+const ctlLooking = () => Math.abs(ctl.h.x) + Math.abs(ctl.h.y) + Math.abs(ctl.e.x) + Math.abs(ctl.e.y) > .01;
+
 const POS = /감사|고맙|축하|기쁘|기쁜|좋은|좋아|행복|성공|웃|반갑|즐거|환영|최고|멋진|따뜻|흥미|기대|설레/;
 const NEG = /사고|사망|숨지|부상|피해|화재|우려|안타깝|슬프|슬픈|위기|참사|재난|실종|폭우|지진|침체|하락|논란|경고|위험/;
 function sentenceMood(text, tone) {
@@ -556,9 +636,11 @@ function onLoaded(avatar, gltf) {
     if (!o.isMesh) return;
     o.frustumCulled = false;
     if (o.morphTargetDictionary && Object.keys(o.morphTargetDictionary).length) avatar.morphMeshes.push(o);
+    if (o.material && o.material.name === 'body') (avatar.faceMeshes || (avatar.faceMeshes = [])).push(o);
     tuneMaterial(o, o.material);
   });
   root.updateMatrixWorld(true);
+  { const hb = avatar.bones[sanitize(avatar.cfg.joints.head)]; if (hb) avatar.headRestWQi = hb.getWorldQuaternion(new THREE.Quaternion()).invert(); }
   for (const name in avatar.bones) {
     const b = avatar.bones[name];
     avatar.rest[name] = { q: b.quaternion.clone(), p: b.position.clone() };
@@ -640,7 +722,7 @@ const player = {
 };
 /* AI conversation state (wired up in section 9) */
 const ai = { on: false, open: false, key: '', model: '', models: [], history: [], rec: null, listening: false, busy: false,
-  ctrl: null, retry: 0, mode: 'idle', hands: true, search: false };
+  ctrl: null, retry: 0, mode: 'idle', hands: true, search: false, barge: true, bargeRec: null, pending: null, curQ: '', lastAiMsg: null };
 let audioCtx = null, recDest = null;
 function ensureAudio() {
   if (!audioCtx) { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); recDest = audioCtx.createMediaStreamDestination(); }
@@ -897,7 +979,7 @@ function startReading(fromIdx = 0, textIn, engIn) {
   if (!avatar.ready) return toast('모델을 불러오는 중입니다.');
   const text = (textIn != null ? textIn : $('script').value).trim(); if (!text) return toast('대본을 입력하세요.');
   stopAll(true);
-  player.text = text; player.sentences = splitSentences(text); player.idx = fromIdx; player.state = 'playing'; player.silentMode = false; const tok = ++player.token;
+  st.lastSeg = null; player.text = text; player.sentences = splitSentences(text); player.idx = fromIdx; player.state = 'playing'; player.silentMode = false; const tok = ++player.token;
   ensureAudio(); setStatus();
   if ((engIn || ui.eng) === 'gemini') playGemini(tok);
   else { if (synth) synth.cancel(); if (!synth || (!koVoices.length && !synth.getVoices().length)) toast('기기 TTS가 없어 입모양만 재생합니다.'); playDeviceSentence(fromIdx, tok); }
@@ -999,12 +1081,13 @@ function update(dt, T) {
     } else if (ai.mode === 'think') {
       aiMood = 'think';
       st.aiThinkT = (st.aiThinkT || 0) - dt;
-      if (st.aiThinkT <= 0) { st.aiThinkT = .9 + Math.random() * 1.3; st.gaze.tx = .07 + Math.random() * .05; st.gaze.ty = -.05 - Math.random() * .03; st.gaze.next = 9; }
+      if (st.aiThinkT <= 0 && !ctlLooking()) { st.aiThinkT = .9 + Math.random() * 1.3; st.gaze.tx = .07 + Math.random() * .05; st.gaze.ty = -.05 - Math.random() * .03; st.gaze.next = 9; }
     }
   }
 
   // --- mood layer (slow)
-  const mood = st.testMood && T < st.testMoodUntil ? MOODS[st.testMood] : aiMood ? MOODS[aiMood] : (MOODS[st.mood] || MOODS.calm);
+  if (ctl.expr === 'laugh' && (ctl.laughLeft -= dt) <= 0) ctl.expr = 'smile';
+  const mood = st.testMood && T < st.testMoodUntil ? MOODS[st.testMood] : ctl.expr ? EXPR[ctl.expr] : aiMood ? MOODS[aiMood] : (MOODS[st.mood] || MOODS.calm);
   for (const k of MORPHS) st.moodW[k] = lerp(st.moodW[k], mood[k] || 0, 1 - Math.exp(-dt / .35));
 
   // --- blinking
@@ -1019,15 +1102,37 @@ function update(dt, T) {
   // --- compose targets
   for (const k of MORPHS) faceTarget[k] = vis[k] + st.moodW[k];
   st.smileW = lerp(st.smileW || 0, ui.smile ? 1 : 0, 1 - Math.exp(-dt / .4));   // gentle resting smile on top of any mood
-  if (st.smileW > .001) { const sw = st.smileW * (st.mood === 'concern' || st.mood === 'serious' ? .35 : 1);
+  if (st.smileW > .001) { const sw = st.smileW * (st.mood === 'concern' || st.mood === 'serious' || /sad|cry|angry/.test(ctl.expr || '') ? (ctl.expr ? 0 : .35) : 1);
     faceTarget.mouthSmileL += .26 * sw; faceTarget.mouthSmileR += .26 * sw; faceTarget.eyeSquint += .1 * sw; }
   const smileDamp = clamp(1 - (vis.mouthPucker || 0) * .8);
   faceTarget.mouthSmileL *= smileDamp; faceTarget.mouthSmileR *= smileDamp;
   faceTarget.browUp += st.browPulse * .28 * (st.mood === 'concern' ? 0 : 1);
-  faceTarget.eyeBlinkL = Math.max(faceTarget.eyeBlinkL, blink) + st.moodW.eyeSquint * .15;
-  faceTarget.eyeBlinkR = Math.max(faceTarget.eyeBlinkR, blink) + st.moodW.eyeSquint * .15;
-  faceTarget.eyeBlinkL += st.gaze.y > 0 ? st.gaze.y * 1.6 : 0; faceTarget.eyeBlinkR += st.gaze.y > 0 ? st.gaze.y * 1.6 : 0;
+  faceTarget.eyeBlinkL = (blink > .01 ? Math.max(faceTarget.eyeBlinkL, blink) : faceTarget.eyeBlinkL) + st.moodW.eyeSquint * .15;
+  faceTarget.eyeBlinkR = (blink > .01 ? Math.max(faceTarget.eyeBlinkR, blink) : faceTarget.eyeBlinkR) + st.moodW.eyeSquint * .15;
+  // upper lids follow the overall gaze: they drop when she looks down (head + eyes), lift a little when she looks up
+  const gp = ctl.cur.hx + ctl.cur.ex;
+  const lid = (st.gaze.y > 0 ? st.gaze.y * 1.6 : 0) + (gp > 0 ? Math.min(.55, gp * 1.05) : Math.max(-.18, gp * .45));
+  faceTarget.eyeBlinkL += lid; faceTarget.eyeBlinkR += lid;
   if (st.testX === 'blink' && T < st.testMoodUntil) faceTarget.eyeBlinkL = faceTarget.eyeBlinkR = 1;
+
+  // --- commanded holds: eyes, wink, mouth (mouth holds wait while she is talking)
+  if (ctl.eyes === 'close') faceTarget.eyeBlinkL = faceTarget.eyeBlinkR = 1;
+  if (ctl.wink) {
+    ctl.wink.t += dt; const p = ctl.wink.t / .6;
+    if (p >= 1) ctl.wink = null;
+    else { const w = Math.sin(Math.min(1, p) * Math.PI); faceTarget.eyeBlinkL = Math.max(faceTarget.eyeBlinkL, w); faceTarget.mouthSmileL += .3 * w; faceTarget.eyeSquint += .15 * w; }
+  }
+  const talkingNow = !!player.tl && player.state !== 'idle';
+  if (!talkingNow) {
+    if (ctl.mouth === 'close') { faceTarget.jawOpen = 0; faceTarget.upperLipUp = 0; faceTarget.lowerLipDown = 0; faceTarget.mouthPress = Math.max(faceTarget.mouthPress, .75); }
+    else if (ctl.mouth === 'open') { faceTarget.jawOpen = .62; faceTarget.upperLipUp = .22; faceTarget.lowerLipDown = .3; faceTarget.mouthPress = 0; faceTarget.mouthPucker = 0; }
+    else if (ctl.mouth === 'pucker') { faceTarget.mouthPucker = 1.45; faceTarget.jawOpen = .04; faceTarget.mouthPress = 0; faceTarget.mouthSmileL *= .2; faceTarget.mouthSmileR *= .2; faceTarget.mouthWide = 0; }
+    if (ctl.expr === 'laugh' && !ctl.mouth) faceTarget.jawOpen += .16 * (.5 + .5 * Math.sin(T * 2 * Math.PI * 4.5));
+  }
+  if (ctl.expr === 'cry') {    // sobbing: a catch of breath every ~1.8 s and a trembling lip
+    const ph = (T % 1.8) / 1.8, sob = Math.exp(-(((ph - .15) / .06) ** 2));
+    faceTarget.browInnerUp += .15 * sob; faceTarget.jawOpen += .1 * sob; faceTarget.mouthFrown += .06 * Math.sin(T * 2 * Math.PI * 7);
+  }
 
   // --- smoothing (fast for mouth, very fast for lids)
   for (const k of MORPHS) {
@@ -1036,15 +1141,17 @@ function update(dt, T) {
   }
   for (const m of avatar.morphMeshes) {
     const d = m.morphTargetDictionary, inf = m.morphTargetInfluences;
-    for (const k of MORPHS) { const i = d[k]; if (i !== undefined) inf[i] = clamp(face[k], -.3, 1.15); }
+    for (const k of MORPHS) { const i = d[k]; if (i !== undefined) inf[i] = clamp(face[k], -.3, k.startsWith('eyeBlink') ? 1.1 : 1.8); }
   }
 
   // --- head & body (spring nod + idle noise + breathing)
   st.nodV += (-st.nod * 60 - st.nodV * 11) * dt; st.nod += st.nodV * dt;
   const talk = st.speaking ? 1 : 0;
-  const hx = noise(T * .35, 1) * .018 + st.nod * .05 + (st.mood === 'question' ? -.02 : 0) + (st.mood === 'concern' ? .03 : 0);
-  const hy = noise(T * .27, 7) * .03 + talk * noise(T * .9, 3) * .012;
-  const hz = noise(T * .22, 4) * .015 + (st.mood === 'question' ? .045 : 0) + (st.mood === 'bright' ? .015 : 0);
+  ctlFrame(dt, T);
+  const cm = ctl.expr ? 0 : 1;   // sentence-mood head habits yield to a commanded expression
+  const hx = noise(T * .35, 1) * .018 + st.nod * .05 + cm * ((st.mood === 'question' ? -.02 : 0) + (st.mood === 'concern' ? .03 : 0)) + ctl.cur.hx;
+  const hy = noise(T * .27, 7) * .03 + talk * noise(T * .9, 3) * .012 + ctl.cur.hy;
+  const hz = noise(T * .22, 4) * .015 + cm * ((st.mood === 'question' ? .045 : 0) + (st.mood === 'bright' ? .015 : 0)) + ctl.cur.hz;
   st.head.x = lerp(st.head.x, hx, 1 - Math.exp(-dt / .18)); st.head.y = lerp(st.head.y, hy, 1 - Math.exp(-dt / .25)); st.head.z = lerp(st.head.z, hz, 1 - Math.exp(-dt / .4));
   const cfg = avatar.cfg;
   const br = Math.sin(T * 2 * Math.PI * .23);
@@ -1057,11 +1164,13 @@ function update(dt, T) {
 
   // --- gaze: hold camera, micro-saccades
   st.gaze.next -= dt;
-  if (st.gaze.next <= 0) { st.gaze.next = st.speaking ? 1.2 + Math.random() * 2 : .8 + Math.random() * 2.5; st.gaze.tx = (Math.random() - .5) * (st.speaking ? .05 : .12); st.gaze.ty = (Math.random() - .5) * .04; }
+  if (st.gaze.next <= 0) { const ga = ctlLooking() ? .35 : 1; st.gaze.next = st.speaking ? 1.2 + Math.random() * 2 : .8 + Math.random() * 2.5; st.gaze.tx = (Math.random() - .5) * (st.speaking ? .05 : .12) * ga; st.gaze.ty = (Math.random() - .5) * .04 * ga; }
   st.gaze.x = lerp(st.gaze.x, st.gaze.tx, 1 - Math.exp(-dt / .03)); st.gaze.y = lerp(st.gaze.y, st.gaze.ty, 1 - Math.exp(-dt / .03));
   if (avatar.eyeWorld && !(POSE_BY_ID[poseState.id] || {}).root) {
     _v.copy(camera.position).sub(avatar.eyeWorld);
-    const yaw = clamp(Math.atan2(_v.x, _v.z) - st.head.y, -.35, .35), pitch = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)) - st.head.x, -.25, .25);
+    // eyes hold the camera, except that a commanded head move carries the gaze with it (plus any eye-only offset)
+    const yaw = clamp(Math.atan2(_v.x, _v.z) - st.head.y + ctl.cur.hy + ctl.cur.ey, -.5, .5);
+    const pitch = clamp(-Math.atan2(_v.y, Math.hypot(_v.x, _v.z)) - st.head.x + ctl.cur.hx + ctl.cur.ex, -.4, .4);
     const ex = pitch + st.gaze.y, ey = yaw + st.gaze.x;
     for (const e of cfg.eyes) poseAboutPivot(e.bones, e.pivot, ex, ey);
   } else for (const e of cfg.eyes) poseAboutPivot(e.bones, e.pivot, st.gaze.y, st.gaze.x);
@@ -1103,8 +1212,9 @@ function applyBodyPose(dt, T, br) {
     if (c[0] || c[1] || c[2]) add(J[jn], c);
   }
   // idle head motion & breathing on top
-  for (const [b, w] of cfg.head) add(b, [st.head.x * w, st.head.y * w, st.head.z * w]);
-  for (const [b, w] of cfg.neck) add(b, [st.head.x * w, st.head.y * w, st.head.z * w]);
+  const Hx = st.head.x + ctl.o.x, Hy = st.head.y + ctl.o.y, Hz = st.head.z + ctl.o.z;   // + nod/shake/laugh/sob oscillation
+  for (const [b, w] of cfg.head) add(b, [Hx * w, Hy * w, Hz * w]);
+  for (const [b, w] of cfg.neck) add(b, [Hx * w, Hy * w, Hz * w]);
   for (const [b, a] of cfg.chest) add(b, [br * a, 0, 0]);
   add(J.upperArmL, [0, 0, br * .01]); add(J.upperArmR, [0, 0, -br * .01]);
   for (const b in acc) P.touched.add(b);
@@ -1132,6 +1242,76 @@ function applyBodyPose(dt, T, br) {
   } else stool.visible = false;
   // re-aim face/bust cameras once a pose has settled (head may have moved)
   if (poseState.recam && poseState.t > .9) { poseState.recam = false; if (camName === 'face' || camName === 'bust') setCam(camName, false, true); }
+}
+
+/* ---- commanded head/eye targets → smoothed offsets, gesture oscillations, tears ---- */
+function ctlFrame(dt, T) {
+  const post = EXPR_POST[ctl.expr] || {};
+  const tg = { hx: clamp(ctl.h.x + (post.hx || 0), -.7, .7), hy: ctl.h.y + (post.hy || 0), hz: ctl.h.z + (post.hz || 0), ex: ctl.e.x + (post.ex || 0), ey: ctl.e.y };
+  const k = 1 - Math.exp(-dt / .3);
+  for (const n in tg) ctl.cur[n] = lerp(ctl.cur[n], tg[n], k);
+  const o = ctl.o; o.x = o.y = o.z = 0;
+  ctl.osc = ctl.osc.filter(s => (s.t += dt) < s.dur);
+  for (const s of ctl.osc) { const env = Math.min(1, s.t / .12) * (1 - s.t / s.dur); o[s.axis] += s.amp * env * Math.sin(s.t * 2 * Math.PI * s.f); }
+  if (ctl.expr === 'laugh') { o.x += .03 * Math.sin(T * 2 * Math.PI * 4.5); o.z += .012 * Math.sin(T * 2 * Math.PI * 2.2); }
+  if (ctl.expr === 'cry') { const ph = (T % 1.8) / 1.8; o.x -= .045 * Math.exp(-(((ph - .15) / .06) ** 2)); o.z += .006 * Math.sin(T * 2 * Math.PI * 6); }
+  tearsFrame(dt);
+}
+
+const tears = { ready: false, failed: false, op: 0, eyes: [] };
+function tearsInit() {
+  tears.failed = true;                                     // set back to false on success
+  const J = avatar.cfg.joints, hb = bone(J.head);
+  const eb = avatar.cfg.eyes.map(e => bone(e.pivot));
+  if (!hb || eb.some(b => !b) || !avatar.faceMeshes || !avatar.headRestWQi) return;
+  avatar.root.updateMatrixWorld(true);
+  const qd = hb.getWorldQuaternion(new THREE.Quaternion()).multiply(avatar.headRestWQi);   // head turn since rest
+  const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(qd), back = fwd.clone().negate();
+  const ray = new THREE.Raycaster(); ray.far = .6;
+  const pE = eb.map(b => b.getWorldPosition(new THREE.Vector3()));
+  // a soft glossy drop
+  const cv = document.createElement('canvas'); cv.width = 32; cv.height = 48; const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(12, 30, 1, 16, 31, 15);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.3, 'rgba(225,238,248,.7)'); gr.addColorStop(1, 'rgba(190,215,235,.15)');
+  g.fillStyle = gr; g.beginPath(); g.moveTo(16, 3); g.quadraticCurveTo(31, 30, 16, 46); g.quadraticCurveTo(1, 30, 16, 3); g.fill();
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const ws = hb.getWorldScale(new THREE.Vector3()).x || 1;
+  const N = 14;
+  for (let i = 0; i < 2; i++) {
+    const s = Math.sign(pE[i].x - pE[1 - i].x) || 1;      // outward
+    const pts = [];
+    for (let j = 0; j <= N; j++) {
+      const t = j / N;
+      const p = pE[i].clone().add(new THREE.Vector3(s * (.002 + .005 * t), -.011 - .05 * t, 0).applyQuaternion(qd)).addScaledVector(fwd, .3);
+      ray.set(p, back);
+      const hit = ray.intersectObjects(avatar.faceMeshes, false)[0];
+      pts.push(hit ? hb.worldToLocal(hit.point.clone().addScaledVector(fwd, .0016)) : null);
+    }
+    for (let j = 0; j <= N; j++) if (!pts[j]) { const a = pts.slice(0, j).reverse().find(Boolean) || pts.slice(j).find(Boolean); if (!a) return; pts[j] = a.clone(); }
+    const mk = (w, h) => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0 })); sp.scale.set(w / ws, h / ws, 1); sp.renderOrder = 3; hb.add(sp); return sp; };
+    const pool = mk(.0075, .0045); pool.position.copy(pts[0]);
+    const drops = [0, .5].map(ph => ({ sp: mk(.0042, .0062), t: ph + i * .23, dur: 2.2 + Math.random() }));
+    tears.eyes.push({ pts, pool, drops });
+  }
+  tears.ready = true; tears.failed = false;
+}
+function tearsAt(pts, u) { const f = clamp(u) * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)); return _v.copy(pts[i]).lerp(pts[i + 1], f - i); }
+function tearsFrame(dt) {
+  const want = ctl.expr === 'cry' ? 1 : 0;
+  if (want && !tears.ready && !tears.failed && avatar.ready) tearsInit();
+  if (!tears.ready) return;
+  tears.op = lerp(tears.op, want, 1 - Math.exp(-dt / (want ? 1.2 : .45)));
+  const on = tears.op > .01;
+  for (const e of tears.eyes) {
+    e.pool.visible = on; e.pool.material.opacity = .6 * tears.op;
+    for (const d of e.drops) {
+      d.sp.visible = on; if (!on) continue;
+      d.t += dt / d.dur; if (d.t >= 1) { d.t -= 1; d.dur = 1.9 + Math.random() * 1.6; }
+      const u = d.t < .3 ? 0 : ((d.t - .3) / .7) ** 1.5;      // swell on the lid, then run down faster
+      d.sp.position.copy(tearsAt(e.pts, u));
+      d.sp.material.opacity = tears.op * .95 * (d.t < .3 ? d.t / .3 : 1) * (1 - clamp((u - .8) / .2));
+    }
+  }
 }
 
 function loop() {
@@ -1214,7 +1394,7 @@ function aiSetMode(m) {
 }
 function setSubLine(t) { $('sub').firstElementChild.textContent = ''; $('sub').lastElementChild.textContent = t; lastSubKey = ''; }
 function addMsg(who, text) {
-  const d = document.createElement('div'); d.className = 'msg ' + who; d.textContent = text;
+  const d = document.createElement('div'); d.className = 'msg ' + who; d.appendChild(document.createTextNode(text));
   const log = $('chatLog'); log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
 }
 function aiErrText(m) {
@@ -1242,7 +1422,7 @@ function aiClose() {
   player.text = ''; player.sentences = [];
   document.body.classList.remove('ai-on');
   $('aiPanel').classList.add('hide'); $('btnAI').classList.remove('open', 'on');
-  aiSetMode('idle'); st.mood = 'calm'; renderSub(-1, true); setStatus();
+  ctlReset(); aiSetMode('idle'); st.mood = 'calm'; renderSub(-1, true); setStatus();
   if (wasOn) toast('AI 대화를 종료했습니다.');
 }
 
@@ -1288,19 +1468,21 @@ async function aiConnect() {
   finally { $('aiConnect').disabled = false; $('aiConnect').textContent = '연결'; }
 }
 function aiStart() {
-  ai.on = true; ai.history = []; ai.retry = 0; $('chatLog').textContent = '';
+  ai.on = true; ai.history = []; ai.retry = 0; ai.pending = null; $('chatLog').textContent = ''; ctlReset();
   document.body.classList.add('ai-on'); $('btnAI').classList.remove('open'); $('btnAI').classList.add('on');
   $('aiSetup').classList.add('hide'); $('aiTalk').classList.remove('hide');
   toast('AI와 대화를 시작합니다');
   const hello = 'AI와 대화를 시작합니다. 무엇이든 편하게 물어보세요.';
-  addMsg('ai', hello); aiSetState('인사하는 중…'); aiSetMode('speak');
-  startReading(0, hello);
+  ai.lastAiMsg = addMsg('ai', hello); aiSetState('인사하는 중…'); aiSetMode('speak');
+  ai.history = [{ role: 'user', parts: [{ text: '(대화 시작)' }] }, { role: 'model', parts: [{ text: hello }] }];
+  startReading(0, hello); aiBargeStart();
 }
 
 /* --- listening (Web Speech API, Korean) --- */
 function aiListen(auto) {
   if (!ai.on || ai.busy || ai.listening || player.state !== 'idle') return;
   if (!SRec) { aiSetState('이 브라우저는 음성 인식을 지원하지 않습니다. 아래 칸에 글로 입력하세요.'); return; }
+  aiStopBarge();
   if (!auto) ai.retry = 0;
   const r = new SRec(); r.lang = 'ko-KR'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
   let fin = '', interim = '', err = '';
@@ -1322,7 +1504,11 @@ function aiListen(auto) {
     if (!r._cancel && ai.hands && (!err || err === 'no-speech') && ai.retry < 2) { ai.retry++; setTimeout(() => aiListen(true), 250); return; }
     aiSetState(IDLE_HINT); renderSub(-1, true);
   };
-  try { r.start(); } catch (e) { aiSetState('음성 인식을 시작하지 못했습니다: ' + e.message); return; }
+  try { r.start(); } catch (e) {
+    if (!auto || !ai._startRetry) { ai._startRetry = true; setTimeout(() => { aiListen(true); }, 350); return; }   // previous recogniser still closing
+    ai._startRetry = false; aiSetState('음성 인식을 시작하지 못했습니다: ' + e.message); return;
+  }
+  ai._startRetry = false;
   ai.rec = r; ai.listening = true; aiSetMode('listen');
   aiSetState('듣고 있어요. 말씀하세요…'); setSubLine('🎙 듣는 중…');
 }
@@ -1330,23 +1516,100 @@ function aiStopListen(cancel) {
   const r = ai.rec; if (!r) return;
   r._cancel = !!cancel; try { cancel ? r.abort() : r.stop(); } catch (e) {}
 }
+
+/* --- barge-in: keep an ear open while she thinks or talks ---
+   The phone speaker leaks her own voice into the mic, so anything that mostly
+   repeats the words she is saying is treated as echo, not as the user. */
+const normKo = t => String(t || '').toLowerCase().replace(/[^0-9a-z가-힣]/g, '');
+function isUserSpeech(seg, final) {
+  const n = normKo(seg);
+  if (n.length < 2 || (!final && n.length < 3)) return false;
+  if (ai.mode !== 'speak') return true;
+  const ref = normKo(player.text); if (!ref) return true;
+  let hit = 0, tot = 0;
+  for (let i = 0; i < n.length - 1; i++) { tot++; if (ref.includes(n.slice(i, i + 2))) hit++; }
+  return tot === 0 ? !ref.includes(n) : hit / tot < .5;
+}
+function aiBargeStart() {
+  if (!ai.on || !ai.barge || !SRec || ai.listening || ai.bargeRec) return;
+  if (ai.mode !== 'speak' && ai.mode !== 'think') return;
+  const r = new SRec(); r.lang = 'ko-KR'; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
+  let hit = -1, text = '', endT = 0; const t0 = performance.now();
+  r.onresult = e => {
+    if (hit < 0) {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (isUserSpeech(e.results[i][0].transcript, e.results[i].isFinal)) { hit = i; break; }
+      }
+      if (hit < 0) return;
+      ai.bargeRec = null; ai.rec = r; aiBargeHit();          // she stops; this recogniser becomes the main ear
+    }
+    let fin = true; text = '';
+    for (let i = hit; i < e.results.length; i++) { text += e.results[i][0].transcript; fin = e.results[i].isFinal; }
+    text = text.trim(); setSubLine('🎙 ' + text);
+    clearTimeout(endT); endT = setTimeout(() => { try { r.stop(); } catch (x) {} }, fin ? 800 : 1800);   // silence = done talking
+  };
+  r.onerror = e => { r._err = e.error; };
+  r.onend = () => {
+    clearTimeout(endT);
+    if (hit >= 0) {
+      if (ai.rec !== r) return;
+      ai.rec = null; ai.listening = false;
+      if (!ai.on) return;
+      if (text && !r._cancel) return aiSubmit(text);
+      aiSetMode('idle'); if (!r._cancel) aiListen(true);
+      return;
+    }
+    if (ai.bargeRec !== r) return;
+    ai.bargeRec = null;
+    if (/not-allowed/.test(r._err || '')) return;
+    if (ai.on && (ai.mode === 'speak' || ai.mode === 'think')) setTimeout(aiBargeStart, performance.now() - t0 < 800 ? 700 : 120);
+  };
+  try { r.start(); } catch (e) { return; }
+  ai.bargeRec = r;
+}
+function aiStopBarge() { const r = ai.bargeRec; if (!r) return; ai.bargeRec = null; try { r.abort(); } catch (e) {} }
+/** What she has actually said of the current answer so far. */
+function spokenSoFar() {
+  const ci = st.lastSeg && player.tl ? st.lastSeg.ci : -1;
+  return ci >= 0 && player.text ? player.text.slice(0, ci + 1).trim() : '';
+}
+function aiCutSpeech() {
+  if (ai.mode !== 'speak' && player.state === 'idle') return;
+  const said = spokenSoFar();
+  ai.pending = { kind: 'cut', said };
+  stopAll(true);
+  if (ai.lastAiMsg) { ai.lastAiMsg.lastChild.nodeValue = (said || '') + ' …(끊김)'; ai.lastAiMsg.classList.add('cut'); }
+}
+function aiCutThink() {
+  if (!ai.busy) return;
+  ai.pending = { kind: 'merge', q: ai.curQ };
+  ai.qTok++; try { ai.ctrl && ai.ctrl.abort(); } catch (e) {}
+  ai.busy = false;
+}
+function aiBargeHit() {
+  if (ai.mode === 'think') aiCutThink(); else aiCutSpeech();
+  ai.listening = true; ai.heard = true; aiSetMode('listen');
+  aiSetState('듣고 있어요… 말이 끝나면 이어서 답합니다.');
+}
 /** Stop listening / thinking (not the voice). */
 function aiHalt() {
   ai.qTok = (ai.qTok || 0) + 1;
   try { ai.ctrl && ai.ctrl.abort(); } catch (e) {}
-  ai.busy = false;
-  aiStopListen(true); ai.rec = null; ai.listening = false;
+  ai.busy = false; ai.pending = null;
+  aiStopBarge(); aiStopListen(true); ai.rec = null; ai.listening = false;
   aiSetMode('idle'); if (ai.on) aiSetState(IDLE_HINT);
 }
 function aiMicPress() {
   if (!ai.on) return;
   if (ai.listening) return aiStopListen(false);               // tap again = "I'm done talking"
-  if (ai.busy) aiHalt();
-  if (player.state !== 'idle') stopAll(true);                 // barge in: cut her off and listen
-  aiListen(false);
+  const hadEar = !!ai.bargeRec; aiStopBarge();
+  if (ai.busy) aiCutThink();
+  else if (player.state !== 'idle') aiCutSpeech();            // cut her off, keep what she said as context
+  aiSetMode('idle');
+  if (hadEar) setTimeout(() => aiListen(false), 250); else aiListen(false);
 }
 function aiAfterSpeak() {
-  aiSetMode('idle');
+  aiStopBarge(); aiSetMode('idle');
   if (ai.hands) { aiSetState('곧 다시 듣습니다…'); setTimeout(() => { if (ai.on && player.state === 'idle' && !ai.busy && !ai.listening) aiListen(true); }, 450); }
   else aiSetState(IDLE_HINT);
 }
@@ -1355,11 +1618,18 @@ function aiAfterSpeak() {
 function aiSystem() {
   const d = new Date();
   return [
-    '당신은 K-ANCHOR의 AI 아나운서 "하나(HANA)"입니다. 지금 사용자와 얼굴을 마주 보고 음성으로 실시간 대화하고 있습니다.',
+    '당신은 K-ANCHOR의 AI 아나운서 "하나(HANA)"입니다. 지금 사용자와 얼굴을 마주 보고 음성으로 실시간 대화하고 있습니다. 사용자는 화면 속 당신의 3D 얼굴을 보고 있습니다.',
     `오늘은 ${d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}, 현재 시각은 ${d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}입니다.`,
     '답변은 그대로 소리 내어 읽힙니다. 마크다운, 목록 기호, 표, 이모지, 링크, 괄호 속 부연 설명을 쓰지 마세요.',
     '방송 아나운서처럼 또렷하고 따뜻한 존댓말 구어체로, 핵심부터 보통 2~4문장, 길어도 6문장 이내로 말하세요. 사용자가 자세히 원할 때만 길게 설명하세요.',
     '음성 인식 때문에 질문이 조금 어색해도 가장 그럴듯한 뜻으로 이해하고 답하세요.',
+    '사용자가 당신의 대답 도중 말을 끊으면 "(대답 도중 끼어들어 한 말)"로 표시됩니다. 끊긴 대답과 새 말을 함께 이해해서 자연스럽게 이어 답하세요. 이미 한 말은 반복하지 말고, 새 말이 앞 이야기와 이어지면 둘을 같이 답하세요.',
+    '"(이어서 덧붙인 말)"이 있으면 앞 질문과 덧붙인 말을 하나의 요청으로 보고 함께 답하세요.',
+    '얼굴 동작: 당신은 시선, 고개, 표정, 눈, 입을 실제로 움직일 수 있습니다. 사용자가 그런 동작을 시키면 답변 맨 앞에 [[동작: id, id]] 태그를 붙이세요. 태그는 소리 내어 읽히지 않습니다.',
+    'id 목록: look_left, look_right, look_up, look_down, look_front(정면 보기), eyes_left, eyes_right, eyes_up, eyes_down(눈만 움직이기), head_down(고개 숙이기), head_up(고개 들기), head_turn_left, head_turn_right(고개 돌리기), head_tilt_left, head_tilt_right(고개 갸웃), nod(끄덕), shake(도리도리), smile, laugh(크게 웃기), shy(수줍게), sad, cry(울기), angry, surprise, wink, blink, eyes_close, eyes_open, mouth_open, mouth_close, pout(뽀뽀하는 입), neutral(표정만 원래대로), reset(시선·고개·표정 모두 원래대로).',
+    'left/right는 사용자가 보는 화면 기준입니다. 사용자가 "네 오른쪽"처럼 당신 몸 기준을 말하면 반대쪽 id를 쓰세요. "더", "많이"처럼 정도를 키우면 id 뒤에 :2 또는 :3을 붙이세요(예: head_down:2).',
+    '동작 지시에는 "네, 오른쪽을 볼게요."처럼 한 문장 이하로 짧게 답하세요. 입을 다물라는 지시처럼 말을 하면 어색한 경우에는 태그만 쓰고 말은 하지 마세요. 울거나 웃으라는 지시에는 그 감정에 어울리는 짧은 말을 해도 좋습니다.',
+    '동작은 다음 지시가 있을 때까지 유지됩니다. "원래대로", "그만", "평소처럼"을 요청하면 reset을 쓰세요. 동작 지시가 없으면 태그를 쓰지 마세요.',
     ai.search ? '최신 정보가 필요하면 검색 결과를 바탕으로 정확하게 답하세요.' : '확인할 수 없는 최신 소식이나 실시간 정보는 지어내지 말고, 정확히 알 수 없다고 솔직하게 말하세요.',
   ].join('\n');
 }
@@ -1369,8 +1639,8 @@ function cleanSpoken(t) {
     .replace(/^\s{0,3}(#{1,6}|[-*•·]|\d+[.)])\s+/gm, '').replace(/[*_`~#>|]/g, '')
     .replace(/\p{Extended_Pictographic}|️/gu, '').replace(/[ \t]+/g, ' ').replace(/ +([.,!?])/g, '$1').replace(/\n{2,}/g, '\n').trim();
 }
-async function aiGenerate(q) {
-  const userTurn = { role: 'user', parts: [{ text: q }] };
+async function aiGenerate(userText) {
+  const userTurn = { role: 'user', parts: [{ text: userText }] };
   let hist = ai.history.slice(-18); while (hist.length && hist[0].role !== 'user') hist.shift();
   const ctrl = ai.ctrl = new AbortController();
   const body = { systemInstruction: { parts: [{ text: aiSystem() }] }, contents: [...hist, userTurn],
@@ -1387,26 +1657,50 @@ async function aiGenerate(q) {
   if (res.status === 400 && body.tools) { delete body.tools; ({ res, j } = await post()); }                                               // model without search
   if (!res.ok) throw new Error(msg() || ('HTTP ' + res.status));
   const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
-  const text = cleanSpoken(parts.filter(p => !p.thought && typeof p.text === 'string').map(p => p.text).join(''));
-  if (!text) throw new Error(j.promptFeedback && j.promptFeedback.blockReason ? '이 질문에는 답할 수 없습니다.' : '빈 답변을 받았습니다. 다시 말씀해 주세요.');
-  ai.history = [...hist, userTurn, { role: 'model', parts: [{ text }] }];
-  return text;
+  const raw = parts.filter(p => !p.thought && typeof p.text === 'string').map(p => p.text).join('');
+  const { acts, text: rest } = parseActs(raw);
+  const say = cleanSpoken(rest);
+  if (!say && !acts.length) throw new Error(j.promptFeedback && j.promptFeedback.blockReason ? '이 질문에는 답할 수 없습니다.' : '빈 답변을 받았습니다. 다시 말씀해 주세요.');
+  const tag = acts.length ? `[[동작: ${acts.map(a => a.id + (a.n > 1 ? ':' + a.n : '')).join(', ')}]] ` : '';
+  ai.history = [...hist, userTurn, { role: 'model', parts: [{ text: (tag + say).trim() }] }];
+  return { say, acts };
 }
 async function aiSubmit(q) {
   if (!ai.on) return;
+  aiStopBarge();
+  const pend = ai.pending; ai.pending = null;
+  let userText = q;
+  if (pend && pend.kind === 'merge' && pend.q) userText = `${pend.q}\n(이어서 덧붙인 말) ${q}`;
+  if (pend && pend.kind === 'cut') {
+    const h = ai.history, last = h[h.length - 1];
+    if (last && last.role === 'model') {
+      const tag = (last.parts[0].text.match(/^\[\[[^\]]*\]\]\s*/) || [''])[0];
+      last.parts = [{ text: tag + (pend.said ? pend.said + ' …' : '') + '(여기까지 말했을 때 사용자가 말을 끊었습니다)' }];
+    }
+    userText = `(대답 도중 끼어들어 한 말) ${q}`;
+  }
   const tok = ai.qTok = (ai.qTok || 0) + 1;
+  ai.curQ = userText;
   addMsg('me', q); ai.busy = true; aiSetMode('think'); aiSetState('생각하는 중…'); setSubLine('🎙 ' + q);
-  let ans;
-  try { ans = await aiGenerate(q); }
+  aiBargeStart();                                              // more words while she thinks are merged in
+  let out;
+  try { out = await aiGenerate(userText); }
   catch (e) {
     if (tok !== ai.qTok) return;
-    ai.busy = false; aiSetMode('idle');
+    ai.busy = false; aiStopBarge(); aiSetMode('idle');
     if (e.name === 'AbortError') return;
     addMsg('err', '오류: ' + aiErrText(e.message)); aiSetState('🎤를 눌러 다시 말씀하세요.'); setSubLine('답변을 가져오지 못했습니다.'); return;
   }
   if (tok !== ai.qTok || !ai.on) return;
-  ai.busy = false; addMsg('ai', ans); aiSetMode('speak'); aiSetState('대답하는 중… 🎤를 누르면 끊고 말할 수 있어요.');
-  startReading(0, ans);
+  ai.busy = false;
+  applyActs(out.acts, !!out.say);
+  const m = addMsg('ai', out.say || '');
+  if (out.acts.length) { const a = document.createElement('span'); a.className = 'act'; a.textContent = '▸ ' + out.acts.map(x => ACTS[x.id].ko).join(' · '); m.insertBefore(a, m.firstChild); }
+  if (!out.say) { m.lastChild.nodeValue = ''; aiStopBarge(); player.text = ''; renderSub(-1, true); aiAfterSpeak(); return; }
+  ai.lastAiMsg = m;
+  aiSetMode('speak'); aiSetState('대답하는 중… 그냥 말하면 끊고 이어서 답합니다.');
+  startReading(0, out.say);
+  aiBargeStart();
 }
 
 /* --- wiring --- */
@@ -1414,13 +1708,20 @@ $('btnAI').onclick = aiToggle;
 $('aiConnect').onclick = aiConnect;
 $('aiKey').addEventListener('keydown', e => { if (e.key === 'Enter') aiConnect(); });
 $('aiMic').onclick = aiMicPress;
-function aiSendText() { const v = $('aiText').value.trim(); if (!v || !ai.on) return; $('aiText').value = ''; aiHalt(); if (player.state !== 'idle') stopAll(true); aiSubmit(v); }
+function aiSendText() {
+  const v = $('aiText').value.trim(); if (!v || !ai.on) return; $('aiText').value = '';
+  aiStopBarge(); if (ai.busy) aiCutThink(); else if (player.state !== 'idle') aiCutSpeech();
+  aiStopListen(true); ai.rec = null; ai.listening = false; aiSubmit(v);
+}
 $('aiSend').onclick = aiSendText;
 $('aiText').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) aiSendText(); });
 ai.hands = store.get('aiHands', 'on') === 'on'; $('aiHands').checked = ai.hands;
 $('aiHands').onchange = e => { ai.hands = e.target.checked; store.set('aiHands', ai.hands ? 'on' : 'off'); };
 ai.search = store.get('aiSearch', 'off') === 'on'; $('aiSearch').checked = ai.search;
 $('aiSearch').onchange = e => { ai.search = e.target.checked; store.set('aiSearch', ai.search ? 'on' : 'off'); };
+ai.barge = store.get('aiBarge', 'on') === 'on'; $('aiBarge').checked = ai.barge;
+$('aiBarge').onchange = e => { ai.barge = e.target.checked; store.set('aiBarge', ai.barge ? 'on' : 'off'); if (!ai.barge) aiStopBarge(); else aiBargeStart(); };
+$('aiCtlReset').onclick = () => { ctlReset(); toast('표정과 자세를 원래대로 돌렸습니다.'); };
 $('aiModel').onchange = e => { ai.model = e.target.value; store.set('aiModel', ai.model); };
 $('aiReset').onclick = () => { ai.history = []; $('chatLog').textContent = ''; toast('대화 기록을 지웠습니다.'); };
 
@@ -1428,7 +1729,7 @@ $('aiReset').onclick = () => { ai.history = []; $('chatLog').textContent = ''; t
 window.__anchor = { buildTimeline, splitSentences, numKo, sampleTimeline, alignTimeline, sentenceMood, face, st, player, VIS,
   setTest(v, mood) { st.test = v; st.testUntil = 1e9; st.testMood = mood || null; st.testMoodUntil = mood ? 1e9 : 0; },
   setCam, startReading, stopAll, camera, scene, get avatar() { return avatar; },
-  ai, aiToggle, aiConnect, aiSubmit, aiMicPress, aiClose, rankModels, cleanSpoken };
+  ai, aiToggle, aiConnect, aiSubmit, aiMicPress, aiClose, rankModels, cleanSpoken, ctl, ACTS, parseActs, applyActs, ctlReset, tears, isUserSpeech };
 </script>
 </body>
 </html>
