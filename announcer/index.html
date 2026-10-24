@@ -1126,7 +1126,7 @@ function update(dt, T) {
   if (!talkingNow) {
     if (ctl.mouth === 'close') { faceTarget.jawOpen = 0; faceTarget.upperLipUp = 0; faceTarget.lowerLipDown = 0; faceTarget.mouthPress = Math.max(faceTarget.mouthPress, .75); }
     else if (ctl.mouth === 'open') { faceTarget.jawOpen = .62; faceTarget.upperLipUp = .22; faceTarget.lowerLipDown = .3; faceTarget.mouthPress = 0; faceTarget.mouthPucker = 0; }
-    else if (ctl.mouth === 'pucker') { faceTarget.mouthPucker = .95; faceTarget.jawOpen = .04; faceTarget.mouthPress = 0; faceTarget.mouthSmileL *= .2; faceTarget.mouthSmileR *= .2; faceTarget.mouthWide = 0; }
+    else if (ctl.mouth === 'pucker') { faceTarget.mouthPucker = 1.45; faceTarget.jawOpen = .04; faceTarget.mouthPress = 0; faceTarget.mouthSmileL *= .2; faceTarget.mouthSmileR *= .2; faceTarget.mouthWide = 0; }
     if (ctl.expr === 'laugh' && !ctl.mouth) faceTarget.jawOpen += .16 * (.5 + .5 * Math.sin(T * 2 * Math.PI * 4.5));
   }
   if (ctl.expr === 'cry') {    // sobbing: a catch of breath every ~1.8 s and a trembling lip
