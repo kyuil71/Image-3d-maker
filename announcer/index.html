@@ -1751,6 +1751,12 @@ function liveClosed(code, reason) {
   const detail = `(${code}${reason ? ': ' + reason : ''}) · ${where} · 모델 ${(live.prof && live.prof.model) || ai.model}`;
   console.warn('[live] closed', detail);
   const neverWorked = !live.okTurns;
+  if (/quota|exceeded|billing|RESOURCE_EXHAUSTED/i.test(reason)) {     // no amount of retrying fixes a quota wall
+    live.fail(neverWorked
+      ? `이 API 키로는 Gemini Live(실시간 음성) 모델을 쓸 수 없습니다. 무료 등급 키는 Live 모델 한도가 없거나 0일 수 있습니다. 결제(Billing)가 연결된 프로젝트의 키를 넣어 주세요. ${detail}`
+      : `Gemini 사용 한도에 도달했습니다. 잠시 후 다시 시도하거나 AI Studio에서 한도·결제를 확인해 주세요. ${detail}`);
+    return;
+  }
   if (ai.on && neverWorked && /^(1007|1008|1011)$/.test(String(code)) && ai.profile < LIVE_PROFILES.length - 1) {
     ai.profile++; live.close(true);
     const step = ['', 'GPT-face와 같은 기본 설정', '검색 도구 없이', '도구 없이'][ai.profile];
