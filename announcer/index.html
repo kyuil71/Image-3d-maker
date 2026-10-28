@@ -119,6 +119,10 @@ details summary{font-size:16px;color:var(--sub);cursor:pointer;padding:4px 0}
 body.ai-on #cardScript,body.ai-on #cardRec{display:none}
 .msg.cut{opacity:.72}
 .msg .act{display:block;color:var(--accent2);font-size:16px;margin-bottom:2px}
+.msg .src{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.msg .src a{color:var(--accent2);font-size:16px;text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:2px 8px}
+.mic.muted{background:#3a2424;border-color:var(--err)}
+.mic.speak{background:#2a3428;border-color:var(--ok)}
 .hint{color:var(--sub);font-size:16px;margin-top:8px;line-height:1.5}
 </style>
 <script type="importmap">
@@ -164,23 +168,30 @@ body.ai-on #cardScript,body.ai-on #cardRec{display:none}
       <div class="aistart">AI와 대화를 시작합니다</div>
       <div class="chat" id="chatLog"></div>
       <div class="micwrap">
-        <button class="mic" id="aiMic" aria-label="말하기">🎤</button>
-        <div id="aiState">🎤를 누르고 질문을 말씀하세요.</div>
+        <button class="mic" id="aiMic" aria-label="마이크">🎤</button>
+        <div id="aiState">연결 중…</div>
       </div>
       <div class="row">
         <input type="text" id="aiText" placeholder="글로 물어봐도 됩니다" enterkeyhint="send">
         <button id="aiSend" style="flex:0 0 auto">보내기</button>
       </div>
-      <div class="hint">말로 시켜 보세요: "오른쪽 봐" · "고개 숙여" · "웃어봐" · "울어봐" · "입 다물어" · "윙크해" · "원래대로"<br>
-        대답 도중에 말하면 HANA가 멈추고 이어서 같이 답합니다.</div>
+      <div class="hint">그냥 말을 걸면 됩니다. HANA가 말하는 도중에 말하면 바로 멈추고 듣습니다.<br>
+        "오른쪽 봐" · "고개 숙여" · "웃어봐" · "울어봐" · "입 다물어" · "윙크해" · "원래대로" · "오늘 날씨 검색해 줘"</div>
       <button id="aiCtlReset" style="margin-top:8px;width:100%">표정 · 자세 원래대로</button>
       <details style="margin-top:10px"><summary>대화 설정</summary>
-        <label class="chk"><input type="checkbox" id="aiHands" checked>대답이 끝나면 자동으로 다시 듣기</label>
-        <label class="chk"><input type="checkbox" id="aiBarge" checked>대답 도중 끼어들기 (스피커 소리에 자꾸 끊기면 끄거나 이어폰 사용)</label>
-        <label class="chk"><input type="checkbox" id="aiSearch">실시간 Google 검색으로 답하기 (조금 느림)</label>
-        <label for="aiModel">대화 모델</label>
+        <label for="aiVoice">목소리</label>
+        <select id="aiVoice">
+          <option value="Kore">Kore · 단단함</option><option value="Aoede">Aoede · 산뜻함</option>
+          <option value="Leda">Leda · 젊음</option><option value="Callirrhoe">Callirrhoe · 편안함</option>
+          <option value="Despina">Despina · 부드러움</option><option value="Sulafat">Sulafat · 따뜻함</option>
+          <option value="Charon">Charon · 정보 전달(남)</option><option value="Orus">Orus · 단단함(남)</option>
+        </select>
+        <label>끼어들기 민감도 <span id="aiSensV"></span></label>
+        <input type="range" id="aiSens" min="0.010" max="0.070" step="0.005" value="0.025">
+        <div class="muted">HANA 목소리에 스스로 자꾸 끊기면 오른쪽(둔하게)으로, 내 말을 잘 못 알아채면 왼쪽(예민하게)으로 옮기세요. 이어폰을 쓰면 가장 정확합니다.</div>
+        <label for="aiModel">Live 모델</label>
         <select id="aiModel"></select>
-        <button id="aiReset" style="margin-top:10px;width:100%">대화 기록 지우기</button>
+        <button id="aiReset" style="margin-top:10px;width:100%">대화 새로 시작</button>
       </details>
     </div>
   </div>
@@ -951,9 +962,12 @@ function buildChunkTimeline(c, D) {
 
 /* ---- transport ---- */
 function setStatus(s) {
-  $('live').classList.toggle('on', player.state === 'playing' || ai.listening);
-  $('btnPlay').textContent = player.state === 'playing' ? '◉ ' + (s || (ai.on ? '대답 중 · 눌러서 끊기' : '방송 중'))
-    : ai.on ? (ai.listening ? '● 듣는 중…' : ai.busy ? '… 생각 중' : '🎤 말하기') : '▶ 읽기';
+  const ls = ai.on ? live.state : '';
+  $('live').classList.toggle('on', player.state === 'playing' || (ai.on && live.ready && !live.muted));
+  $('btnPlay').textContent = ai.on
+    ? (!live.ready ? (ls === 'connecting' ? '… 연결 중' : '🔄 다시 연결') : live.muted ? '🔇 마이크 켜기'
+      : ls === 'listening' ? '● 듣는 중…' : ls === 'speaking' ? '◉ 말하는 중' : ls === 'searching' ? '🔎 검색 중' : ls === 'thinking' ? '… 생각 중' : '🎤 말씀하세요')
+    : player.state === 'playing' ? '◉ ' + (s || '방송 중') : '▶ 읽기';
 }
 function onSentence(i, last = i) {
   const s = player.sentences[i]; st.mood = sentenceMood(s.text, ui.tone); st.curSi = i;
@@ -972,7 +986,6 @@ function finishAll(tok) {
   st.mood = ui.tone === 'serious' ? 'serious' : 'bright'; setTimeout(() => { if (player.state === 'idle') st.mood = 'calm'; }, 2600);
   renderSub(-1, true);
   if (rec.mr && rec.mr.state === 'recording') setTimeout(() => rec.stop(), 900);
-  if (ai.on) aiAfterSpeak();
 }
 /** text: optional text to speak instead of the script box (AI answers). eng: optional engine override. */
 function startReading(fromIdx = 0, textIn, engIn) {
@@ -1068,6 +1081,7 @@ function update(dt, T) {
       }
     }
   } else for (const k of MORPHS) vis[k] = 0;
+  if (ai.on && liveLips(T)) speakingNow = true;
   if (st.test && T < st.testUntil) { for (const k of MORPHS) vis[k] = 0; Object.assign(vis, VIS[st.test] || {}); }
   st.speaking = speakingNow;
 
@@ -1122,7 +1136,7 @@ function update(dt, T) {
     if (p >= 1) ctl.wink = null;
     else { const w = Math.sin(Math.min(1, p) * Math.PI); faceTarget.eyeBlinkL = Math.max(faceTarget.eyeBlinkL, w); faceTarget.mouthSmileL += .3 * w; faceTarget.eyeSquint += .15 * w; }
   }
-  const talkingNow = !!player.tl && player.state !== 'idle';
+  const talkingNow = (!!player.tl && player.state !== 'idle') || (ai.on && live.speaking);
   if (!talkingNow) {
     if (ctl.mouth === 'close') { faceTarget.jawOpen = 0; faceTarget.upperLipUp = 0; faceTarget.lowerLipDown = 0; faceTarget.mouthPress = Math.max(faceTarget.mouthPress, .75); }
     else if (ctl.mouth === 'open') { faceTarget.jawOpen = .62; faceTarget.upperLipUp = .22; faceTarget.lowerLipDown = .3; faceTarget.mouthPress = 0; faceTarget.mouthPucker = 0; }
@@ -1362,7 +1376,7 @@ $('btnPlay').onclick = () => {
   if (ai.on) return aiMicPress();
   if (player.state === 'paused') togglePause(); else if (player.state === 'idle') startReading(0);
 };
-$('btnStop').onclick = () => { if (ai.on) aiHalt(); stopAll(); };
+$('btnStop').onclick = () => { if (ai.on) { live.hush(); return; } stopAll(); };
 $('btnPause').onclick = () => togglePause();
 $('btnRec').onclick = () => { if (rec.mr && rec.mr.state === 'recording') { stopAll(); rec.stop(); return; } if (rec.start()) startReading(0); };
 document.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { st.test = b.dataset.v; st.testUntil = clockT.elapsedTime + 1.4; });
@@ -1372,30 +1386,277 @@ document.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
-  if (ai.on) aiHalt();
+  if (ai.on && live.ready && !live.muted) live.mute(true);       // background tab: stop listening
   if (player.state === 'playing' && ui.eng === 'device') stopAll();
 });
 
 /* =====================================================================
-   9. AI CONVERSATION (Gemini) — speak → recognise → answer → anchor reads it
+   9. AI CONVERSATION — Gemini Live (one realtime audio session, same wire
+   protocol as GPT-face/live.js): mic PCM 16 kHz in → native voice 24 kHz out.
+   Barge-in = local voice activity detection on an echo-cancelled mic.
    ===================================================================== */
 const GAPI = 'https://generativelanguage.googleapis.com/v1beta';
-const SRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-const IDLE_HINT = '🎤를 누르고 질문을 말씀하세요.';
+const LIVE_WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const LIVE_DEFAULT = 'gemini-3.8-live';
+// AudioWorklet: resample the native-rate mic to 16 kHz, post 40 ms chunks
+const RECORDER_SRC = `class PCMRecorder extends AudioWorkletProcessor {
+ constructor(){super();this.sum=0;this.count=0;this.phase=0;this.ratio=sampleRate/16000;this.chunk=new Float32Array(640);this.index=0;}
+ process(inputs){const input=inputs[0]&&inputs[0][0];if(input)for(const s of input){this.sum+=s;this.count++;this.phase++;if(this.phase>=this.ratio){this.chunk[this.index++]=this.sum/this.count;this.sum=0;this.count=0;this.phase-=this.ratio;if(this.index===640){this.port.postMessage(this.chunk.buffer,[this.chunk.buffer]);this.chunk=new Float32Array(640);this.index=0;}}}return true;}
+}
+registerProcessor('pcm-recorder',PCMRecorder);`;
+let recorderURL = null;
+
+function pcmBase64(samples) {
+  const bytes = new Uint8Array(samples.length * 2), v = new DataView(bytes.buffer);
+  for (let i = 0; i < samples.length; i++) v.setInt16(i * 2, Math.round(clamp(samples[i], -1, 1) * 32767), true);
+  let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function liveSystem() {
+  const d = new Date();
+  return [
+    '당신은 K-ANCHOR의 AI 아나운서 "하나(HANA)"입니다. 사용자와 얼굴을 마주 보고 실시간 음성으로 대화합니다. 사용자는 화면 속 당신의 3D 얼굴을 보고 있습니다.',
+    `오늘은 ${d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}입니다.`,
+    '방송 아나운서처럼 또렷하고 따뜻한 존댓말로, 핵심부터 짧고 자연스럽게 말하세요. 보통 2~4문장으로 답하고, 사용자가 자세히 원할 때만 길게 설명하세요.',
+    '사용자가 끼어들면 이전 답을 멈추고 새 말을 끝까지 들은 뒤, 끊기기 전까지 한 이야기와 새 말을 함께 이해해서 이어서 답하세요. 이미 한 말은 반복하지 마세요.',
+    '최신 정보, 날씨, 뉴스, 가격, 일정, 경기 결과나 검색 요청에는 google_search를 사용하세요. 검색할 때는 "확인해 볼게요"처럼 짧게 말하고, URL은 읽지 마세요. 검색하지 않은 정보를 검색했다고 말하지 마세요.',
+    '시선, 고개, 표정, 눈, 입을 움직여 달라는 요청에는 반드시 perform_action을 호출하고, 결과를 확인한 뒤 짧게 한 문장으로 답하세요. 이야기의 감정에 맞게 가끔 스스로 웃거나 끄덕여도 좋습니다.',
+    '왼쪽과 오른쪽은 사용자가 보는 화면 기준입니다. 사용자가 "네 오른쪽"처럼 당신 몸 기준을 말하면 반대쪽을 쓰세요. "더", "많이"는 intensity를 2~3으로 하세요.',
+    '동작은 다음 지시까지 유지됩니다. "원래대로", "그만", "평소처럼"은 reset입니다. 입을 다물라는 지시에는 대답하지 말고 동작만 하세요.',
+  ].join('\n');
+}
+function liveSetup(model, voice) {
+  const ids = Object.keys(ACTS);
+  return { setup: {
+    model: 'models/' + model.replace(/^models\//, ''),
+    generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
+    systemInstruction: { parts: [{ text: liveSystem() }] },
+    inputAudioTranscription: {}, outputAudioTranscription: {},
+    realtimeInputConfig: { automaticActivityDetection: { disabled: true }, activityHandling: 'START_OF_ACTIVITY_INTERRUPTS', turnCoverage: 'TURN_INCLUDES_ONLY_ACTIVITY' },
+    contextWindowCompression: { slidingWindow: {} }, sessionResumption: {},
+    tools: [{ googleSearch: {} }, { functionDeclarations: [{ name: 'perform_action',
+      description: 'HANA의 시선·고개·표정·눈·입 동작 실행. ' + ids.map(i => `${i}=${ACTS[i].ko}`).join(', '),
+      parameters: { type: 'OBJECT', properties: {
+        actions: { type: 'ARRAY', items: { type: 'STRING', enum: ids } },
+        intensity: { type: 'NUMBER', description: '정도 1~3 (기본 1)' } }, required: ['actions'] } }] }],
+  } };
+}
+
+/** Live session: mic → server; server audio → speaker + lips. */
+const live = {
+  ws: null, ready: false, state: 'closed', epoch: 0, nodes: new Set(), nextTime: 0, speaking: false, userActive: false,
+  blockOutput: false, muted: false, pre: [], above: 0, lastVoice: 0, turn: 0, inputText: '', outputText: '', serverDone: true,
+  threshold: .025, analyser: null, wave: null, spec: null, calls: new Set(), canceled: new Set(), greeted: false,
+  emit(s) { this.state = s; liveOnState(s); },
+  send(v) { if (this.ws && this.ws.readyState === 1) { this.ws.send(JSON.stringify(v)); return true; } return false; },
+  async connect({ key, model, voice }) {
+    this.close(true); const ep = ++this.epoch; this.closed = false;
+    this.calls.clear(); this.canceled.clear(); this.inputText = ''; this.outputText = ''; this.blockOutput = false; this.userActive = false; this.pre = []; this.greeted = false;
+    this.emit('connecting');
+    this.timer = setTimeout(() => this.fail('연결 시간 초과: API 키, 모델 접근 권한과 네트워크를 확인해 주세요.'), 30000);
+    try {
+      const ctx = this.ctx = ensureAudio(); await ctx.resume();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      if (ep !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
+      this.stream = stream;
+      if (!recorderURL) recorderURL = URL.createObjectURL(new Blob([RECORDER_SRC], { type: 'text/javascript' }));
+      if (!ctx.__pcmRec) { await ctx.audioWorklet.addModule(recorderURL); ctx.__pcmRec = true; }
+      if (ep !== this.epoch) return;
+      this.analyser = ctx.createAnalyser(); this.analyser.fftSize = 1024; this.analyser.smoothingTimeConstant = .25;
+      this.analyser.connect(ctx.destination); if (recDest) this.analyser.connect(recDest);
+      this.wave = new Float32Array(this.analyser.fftSize); this.spec = new Uint8Array(this.analyser.frequencyBinCount);
+      this.mic = ctx.createMediaStreamSource(stream); this.rec = new AudioWorkletNode(ctx, 'pcm-recorder');
+      this.silent = ctx.createGain(); this.silent.gain.value = 0;
+      this.mic.connect(this.rec); this.rec.connect(this.silent).connect(ctx.destination);
+      this.rec.port.onmessage = e => { if (ep === this.epoch) this.capture(new Float32Array(e.data)); };
+      const ws = this.ws = new WebSocket(LIVE_WS + '?key=' + encodeURIComponent(key));
+      ws.onopen = () => { if (ep === this.epoch) this.send(liveSetup(model, voice)); };
+      let chain = Promise.resolve();
+      ws.onmessage = e => { chain = chain.then(async () => { if (ep !== this.epoch) return; const raw = typeof e.data === 'string' ? e.data : await e.data.text(); if (ep === this.epoch) this.handle(JSON.parse(raw)); })
+        .catch(() => { if (ep === this.epoch) this.fail('음성 이벤트를 처리하지 못했습니다. 다시 연결해 주세요.'); }); };
+      ws.onerror = () => { if (ep === this.epoch) this.fail('Gemini에 연결하지 못했습니다. API 키와 네트워크를 확인해 주세요.'); };
+      ws.onclose = e => { if (ep === this.epoch && !this.closed) this.fail('Gemini 연결 종료' + (e.code ? ' (' + e.code + (e.reason ? ': ' + e.reason : '') + ')' : '') + '. API 키·모델 접근 권한·사용 한도를 확인해 주세요.'); };
+    } catch (e) { if (ep === this.epoch) this.fail(e.name === 'NotAllowedError' ? '마이크 권한을 허용해 주세요.' : e.message); }
+  },
+  /** Local voice-activity detection: 80 ms of voice starts a turn (and cuts her off), 850 ms of quiet ends it. */
+  capture(samples) {
+    if (!this.ready || this.muted) return;
+    let p = 0; for (const v of samples) p += v * v; const rms = Math.sqrt(p / samples.length), now = performance.now();
+    this.micLevel = rms;
+    const packet = { audio: { data: pcmBase64(samples), mimeType: 'audio/pcm;rate=16000' } };
+    this.pre.push(packet); if (this.pre.length > 8) this.pre.shift();          // 320 ms pre-roll so the first syllable isn't lost
+    if (rms > this.threshold) { this.above += samples.length / 16000; this.lastVoice = now; } else this.above = 0;
+    if (!this.userActive && this.above >= .08) {
+      this.userActive = true; this.blockOutput = true; this.inputText = ''; this.turn++;
+      const wasSpeaking = this.speaking; this.clearAudio(); liveOnInterrupt(wasSpeaking); this.emit('listening');
+      this.send({ realtimeInput: { activityStart: {} } }); for (const q of this.pre) this.send({ realtimeInput: q }); this.pre = []; return;
+    }
+    if (this.userActive) {
+      this.send({ realtimeInput: packet });
+      if (now - this.lastVoice > 850) { this.userActive = false; this.send({ realtimeInput: { activityEnd: {} } }); this.blockOutput = false; this.outputText = ''; this.emit('thinking'); }
+    }
+  },
+  handle(e) {
+    if (e.error) return this.fail(e.error.message || 'Gemini API 오류');
+    if (e.setupComplete) { clearTimeout(this.timer); this.ready = true; this.emit('connected'); return; }
+    if (e.goAway) liveNotice('음성 세션이 곧 종료됩니다. 끊기면 🎤를 눌러 다시 연결하세요.');
+    for (const id of (e.toolCallCancellation && e.toolCallCancellation.ids) || []) this.canceled.add(id);
+    const s = e.serverContent;
+    if (s) {
+      if (s.interrupted) { const was = this.speaking; this.clearAudio(); liveOnInterrupt(was); this.outputText = ''; if (this.userActive) this.emit('listening'); }
+      if (s.inputTranscription && s.inputTranscription.text) {
+        this.inputText += s.inputTranscription.text; liveTranscript('me', this.inputText, this.turn);
+        if (!this.userActive && /검색|날씨|최신|뉴스|시세|가격|일정/.test(this.inputText)) this.emit('searching');
+      }
+      if (!this.userActive && !this.blockOutput && !s.interrupted) {
+        if (s.outputTranscription && s.outputTranscription.text) { this.outputText += s.outputTranscription.text; liveTranscript('ai', this.outputText, this.turn); }
+        for (const p of (s.modelTurn && s.modelTurn.parts) || []) {
+          if (p.inlineData && /^audio\/pcm/.test(p.inlineData.mimeType || '')) this.enqueue(p.inlineData);
+          if (p.executableCode) this.emit('searching');
+        }
+        if (s.groundingMetadata) liveSources(s.groundingMetadata, this.turn);
+      }
+      if (s.turnComplete) { this.serverDone = true; if (!this.nodes.size && !this.userActive) this.emit('connected'); }
+    }
+    if (e.toolCall) {
+      const responses = [];
+      for (const c of e.toolCall.functionCalls || []) {
+        if (this.calls.has(c.id)) continue; this.calls.add(c.id);
+        let response = { ok: false, message: '취소되었거나 지원하지 않는 요청입니다.' };
+        if (!this.userActive && !this.canceled.has(c.id) && c.name === 'perform_action') {
+          try { response = livePerform(c.args || {}, this.turn); } catch (err) { response = { ok: false, message: '동작을 실행하지 못했습니다.' }; }
+        }
+        responses.push({ id: c.id, name: c.name, response });
+      }
+      if (responses.length) this.send({ toolResponse: { functionResponses: responses } });
+    }
+  },
+  enqueue(data) {
+    if (!this.ctx || this.userActive || this.blockOutput) return;
+    const raw = atob(data.data), n = raw.length >> 1, rate = Number((/rate=(\d+)/.exec(data.mimeType) || [])[1] || 24000);
+    const buf = this.ctx.createBuffer(1, n, rate), out = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) { let v = raw.charCodeAt(i * 2) | (raw.charCodeAt(i * 2 + 1) << 8); if (v >= 32768) v -= 65536; out[i] = v / 32768; }
+    const node = this.ctx.createBufferSource(); node.buffer = buf; node.connect(this.analyser);
+    this.nextTime = Math.max(this.nextTime || 0, this.ctx.currentTime + .025); node.start(this.nextTime); this.nextTime += buf.duration;
+    this.nodes.add(node); this.speaking = true; this.serverDone = false; if (this.state !== 'speaking') this.emit('speaking');
+    node.onended = () => { this.nodes.delete(node); try { node.disconnect(); } catch (e) {} if (!this.nodes.size) { this.speaking = false; if (this.ready && !this.userActive) this.emit(this.serverDone ? 'connected' : 'thinking'); } };
+  },
+  clearAudio() { for (const n of this.nodes) { n.onended = null; try { n.stop(); n.disconnect(); } catch (e) {} } this.nodes.clear(); this.nextTime = 0; this.speaking = false; },
+  /** Stop her voice locally (until the next user turn). */
+  hush() { this.clearAudio(); this.blockOutput = true; if (this.ready && !this.userActive) this.emit('connected'); },
+  text(t, silentUser) {
+    if (!this.ready) return false;
+    this.clearAudio(); this.userActive = false; this.blockOutput = false; this.turn++; this.outputText = '';
+    if (!silentUser) liveTranscript('me', t, this.turn);
+    this.send({ realtimeInput: { activityStart: {} } }); this.send({ realtimeInput: { text: t } }); this.send({ realtimeInput: { activityEnd: {} } });
+    this.emit('thinking'); return true;
+  },
+  mute(v) {
+    this.muted = v; if (this.stream) this.stream.getAudioTracks().forEach(t => t.enabled = !v);
+    if (v && this.userActive) { this.send({ realtimeInput: { activityEnd: {} } }); this.userActive = false; this.blockOutput = false; this.emit('thinking'); }
+    this.pre = []; this.above = 0; liveOnState(this.state);
+  },
+  fail(msg) { this.close(true); this.emit('error'); liveNotice(String(msg).replace(/AIza[\w-]+/g, '[키 숨김]')); },
+  close(quiet) {
+    this.closed = true; this.ready = false; this.epoch++; clearTimeout(this.timer);
+    if (this.ws) { this.ws.onclose = null; this.ws.onerror = null; try { this.ws.close(); } catch (e) {} this.ws = null; }
+    this.clearAudio();
+    if (this.rec) { this.rec.port.onmessage = null; try { this.rec.disconnect(); } catch (e) {} this.rec = null; }
+    try { this.mic && this.mic.disconnect(); } catch (e) {} this.mic = null;
+    try { this.silent && this.silent.disconnect(); } catch (e) {} this.silent = null;
+    try { this.analyser && this.analyser.disconnect(); } catch (e) {} this.analyser = null;
+    if (this.stream) this.stream.getTracks().forEach(t => t.stop()); this.stream = null;
+    this.muted = false; this.userActive = false; this.pre = [];
+    if (!quiet) this.emit('closed');
+  },
+};
+
+/** Lips from the voice actually playing: loudness opens the jaw, spectrum picks round vs wide vs sibilant. */
+const lipBand = { lo: 0, mid: 0, hi: 0, sib: 0 };
+function liveLips(T) {
+  if (!live.analyser || !live.speaking || live.userActive) return false;
+  live.analyser.getFloatTimeDomainData(live.wave);
+  let p = 0; for (const v of live.wave) p += v * v; const vol = Math.sqrt(p / live.wave.length);
+  live.analyser.getByteFrequencyData(live.spec);
+  const hz = live.ctx.sampleRate / live.analyser.fftSize, band = (a, b) => { let s = 0; const i0 = Math.round(a / hz), i1 = Math.round(b / hz); for (let i = i0; i < i1; i++) s += live.spec[i]; return s / Math.max(1, i1 - i0); };
+  const lo = band(250, 800), mid = band(800, 1600), hi = band(1600, 3200), sib = band(4500, 9000), tot = lo + mid + hi + 1;
+  const k = .45; lipBand.lo += (lo / tot - lipBand.lo) * k; lipBand.mid += (mid / tot - lipBand.mid) * k; lipBand.hi += (hi / tot - lipBand.hi) * k; lipBand.sib += (sib / (tot / 3) - lipBand.sib) * k;
+  const open = clamp((vol - .006) * 7) ** .8;
+  if (open < .02) return true;
+  const round = clamp((lipBand.lo - .38) * 3.2), wide = clamp((lipBand.hi - .26) * 3.5), s = clamp((lipBand.sib - .35) * 2);
+  vis.jawOpen = open * (.72 - .3 * wide - .35 * s) ; vis.upperLipUp = open * (.24 + .1 * wide); vis.lowerLipDown = open * .22;
+  vis.mouthPucker = open * round * .95; vis.mouthWide = open * (wide * .75 + s * .4) * (1 - round * .7);
+  if (open > .7 && st.lastPeak < T - .45) { st.nodV -= .9 * (open - .5); st.lastPeak = T; }
+  return true;
+}
 
 function aiSetState(t) { $('aiState').textContent = t; }
 function aiSetMode(m) {
   const was = ai.mode; ai.mode = m;
   if (was === 'think' && m !== 'think') { st.gaze.tx = 0; st.gaze.ty = 0; st.gaze.next = .4; }
   if (m === 'listen') { st.gaze.tx = 0; st.gaze.ty = 0; st.gaze.next = .6; st.aiNodT = 1; }
-  $('aiMic').classList.toggle('on', ai.listening);
-  $('aiMic').classList.toggle('think', m === 'think');
-  setStatus();
 }
 function setSubLine(t) { $('sub').firstElementChild.textContent = ''; $('sub').lastElementChild.textContent = t; lastSubKey = ''; }
 function addMsg(who, text) {
   const d = document.createElement('div'); d.className = 'msg ' + who; d.appendChild(document.createTextNode(text));
   const log = $('chatLog'); log.appendChild(d); log.scrollTop = log.scrollHeight; return d;
+}
+const bubbles = new Map();
+function bubble(who, turn) {
+  const id = who + turn; let d = bubbles.get(id);
+  if (!d || !d.isConnected) { d = addMsg(who, ''); bubbles.set(id, d); }
+  return d;
+}
+function liveTranscript(who, text, turn) {
+  if (who === 'ai' && ai.hideTurn === turn) return;
+  const d = bubble(who, turn); let tn = d.firstChild; while (tn && tn.nodeType !== 3) tn = tn.nextSibling;
+  if (!tn) { tn = document.createTextNode(''); d.insertBefore(tn, d.querySelector('.src')); }
+  tn.nodeValue = text.trim(); const log = $('chatLog'); log.scrollTop = log.scrollHeight;
+  if (who === 'ai') setSubLine(text.trim().slice(-80)); else setSubLine('🎙 ' + text.trim());
+}
+function liveSources(meta, turn) {
+  const d = bubble('ai', turn); let box = d.querySelector('.src');
+  for (const c of meta.groundingChunks || []) {
+    const web = c.web; if (!web || !web.uri) continue;
+    let url; try { url = new URL(web.uri); if (!/^https?:$/.test(url.protocol)) continue; } catch (e) { continue; }
+    if (!box) { box = document.createElement('div'); box.className = 'src'; d.appendChild(box); }
+    if ([...box.querySelectorAll('a')].some(a => a.href === url.href)) continue;
+    const a = document.createElement('a'); a.href = url.href; a.textContent = web.title || url.hostname; a.target = '_blank'; a.rel = 'noopener noreferrer'; box.appendChild(a);
+  }
+}
+function livePerform(args, turn) {
+  const n = clamp(Math.round(+args.intensity || 1), 1, 3);
+  const acts = (args.actions || []).filter(id => ACTS[id]).map(id => ({ id, n }));
+  if (!acts.length) return { ok: false, message: '지원하지 않는 동작입니다.' };
+  applyActs(acts, false);
+  const d = bubble('ai', turn); let chip = d.querySelector('.act');
+  if (!chip) { chip = document.createElement('span'); chip.className = 'act'; d.insertBefore(chip, d.firstChild); }
+  chip.textContent = '▸ ' + [...new Set([...(chip.textContent.replace(/^▸ /, '').split(' · ').filter(Boolean)), ...acts.map(a => ACTS[a.id].ko)])].join(' · ');
+  return { ok: true, done: acts.map(a => ACTS[a.id].ko).join(', ') };
+}
+function liveOnInterrupt(wasSpeaking) {
+  if (!wasSpeaking) return;
+  const d = bubbles.get('ai' + live.turn) || bubbles.get('ai' + (live.turn - 1));
+  if (d) d.classList.add('cut');
+}
+function liveNotice(t) { addMsg('err', t); toast(t, 4500); }
+const STATE_TXT = {
+  connecting: ['연결 중…', 'think'], connected: ['말씀하세요. 그냥 말을 걸면 됩니다.', 'idle'], listening: ['듣고 있어요…', 'listen'],
+  thinking: ['생각하는 중…', 'think'], searching: ['검색으로 확인하는 중…', 'think'], speaking: ['말하는 중 · 말을 걸면 바로 멈춰요', 'speak'],
+  error: ['연결이 끊겼습니다. 🎤를 눌러 다시 연결하세요.', 'idle'], closed: ['연결 전', 'idle'],
+};
+function liveOnState(s) {
+  const [txt, mode] = STATE_TXT[s] || STATE_TXT.closed;
+  aiSetMode(mode);
+  aiSetState(live.muted && live.ready ? '마이크가 꺼져 있습니다. 🎤를 눌러 켜세요.' : txt);
+  const mic = $('aiMic');
+  mic.classList.toggle('on', s === 'listening'); mic.classList.toggle('think', mode === 'think'); mic.classList.toggle('speak', s === 'speaking');
+  mic.classList.toggle('muted', live.muted); mic.textContent = live.muted ? '🔇' : (s === 'error' ? '🔄' : '🎤');
+  if (s === 'connected' && ai.on && !live.greeted) {          // first contact: she greets on her own
+    live.greeted = true; ai.hideTurn = null;
+    live.text('(대화가 연결됨) 사용자에게 "AI와 대화를 시작합니다"라고 말하며 한두 문장으로 짧게 인사하고, 무엇이든 물어보라고 해 주세요.', true);
+  }
+  setStatus();
 }
 function aiErrText(m) {
   m = String(m || '');
@@ -1418,7 +1679,7 @@ function aiToggle() {
 }
 function aiClose() {
   const wasOn = ai.on;
-  ai.on = false; ai.open = false; aiHalt(); stopAll(true);
+  ai.on = false; ai.open = false; live.close(true); live.state = 'closed'; stopAll(true);
   player.text = ''; player.sentences = [];
   document.body.classList.remove('ai-on');
   $('aiPanel').classList.add('hide'); $('btnAI').classList.remove('open', 'on');
@@ -1426,40 +1687,33 @@ function aiClose() {
   if (wasOn) toast('AI 대화를 종료했습니다.');
 }
 
-/* --- key check + model choice --- */
+/* --- key check + Live model choice --- */
 async function aiListModels(key) {
   const res = await fetch(`${GAPI}/models?pageSize=1000`, { headers: { 'x-goog-api-key': key } });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((j.error && j.error.message) || ('HTTP ' + res.status));
-  return (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace(/^models\//, ''));
+  return j.models || [];
 }
-function rankModels(names) {
-  const chat = names.filter(n => /^gemini-/.test(n) && !/(tts|image|live|audio|embed|vision|robotics|computer-use|aqa|learnlm|nano|banana|veo|lyria|native|gemma)/i.test(n));
-  const score = n => {
-    if (n === 'gemini-flash-latest') return 1e4;               // Google's always-current Flash alias
-    const v = parseFloat((n.match(/^gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
-    let s = v * 10;
-    if (/flash/.test(n)) s += 50;                               // fast enough for live conversation
-    if (/lite/.test(n)) s -= 8;
-    if (/preview|exp/.test(n)) s -= 3;
-    if (/-\d{3}$|\d{2}-\d{2}/.test(n)) s -= 1;                  // dated snapshots after aliases
-    return s;
-  };
-  return chat.sort((a, b) => score(b) - score(a));
+function rankLive(models) {
+  const names = models.filter(m => (m.supportedGenerationMethods || []).includes('bidiGenerateContent') || /live|native-audio/.test(m.name))
+    .map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini-/.test(n));
+  const score = n => (n === LIVE_DEFAULT ? 1e4 : 0) + parseFloat((n.match(/^gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0) * 10 + (/live/.test(n) ? 5 : 0) - (/preview|exp/.test(n) ? 3 : 0);
+  const out = [...new Set(names)].sort((a, b) => score(b) - score(a));
+  return out.length ? out : [LIVE_DEFAULT];
 }
 async function aiConnect() {
   const key = $('aiKey').value.trim();
   if (!key) { $('aiErr').textContent = 'API 키를 입력하세요.'; return; }
   if (!avatar.ready) return toast('모델을 불러오는 중입니다.');
+  if (!navigator.mediaDevices || !window.isSecureContext) { $('aiErr').textContent = '마이크는 HTTPS 주소에서만 사용할 수 있습니다.'; return; }
   ensureAudio();                                               // unlock audio inside the tap
   $('aiConnect').disabled = true; $('aiConnect').textContent = '확인 중…'; $('aiErr').textContent = '';
   try {
-    const ranked = rankModels(await aiListModels(key));
-    if (!ranked.length) throw new Error('이 키로 쓸 수 있는 대화 모델이 없습니다.');
+    const ranked = rankLive(await aiListModels(key));
     if (!ai.open) return;                                      // closed while checking
-    ai.key = key; ai.models = ranked; store.set('aiKey', key);
+    ai.key = key; store.set('aiKey', key);
     if (!$('gemKey').value.trim()) { $('gemKey').value = key; store.set('gemKey', key); }
-    const saved = store.get('aiModel', ''); ai.model = ranked.includes(saved) ? saved : ranked[0];
+    const saved = store.get('liveModel', ''); ai.model = ranked.includes(saved) ? saved : ranked[0];
     const sel = $('aiModel'); sel.textContent = '';
     for (const n of ranked) { const o = document.createElement('option'); o.value = o.textContent = n; sel.appendChild(o); }
     sel.value = ai.model;
@@ -1467,240 +1721,23 @@ async function aiConnect() {
   } catch (e) { $('aiErr').textContent = '연결 실패: ' + aiErrText(e.message); }
   finally { $('aiConnect').disabled = false; $('aiConnect').textContent = '연결'; }
 }
+function liveGo() { live.threshold = +$('aiSens').value; live.connect({ key: ai.key, model: ai.model, voice: $('aiVoice').value }); }
 function aiStart() {
-  ai.on = true; ai.history = []; ai.retry = 0; ai.pending = null; $('chatLog').textContent = ''; ctlReset();
+  ai.on = true; bubbles.clear(); $('chatLog').textContent = ''; ctlReset(); stopAll(true);
   document.body.classList.add('ai-on'); $('btnAI').classList.remove('open'); $('btnAI').classList.add('on');
   $('aiSetup').classList.add('hide'); $('aiTalk').classList.remove('hide');
-  toast('AI와 대화를 시작합니다');
-  const hello = 'AI와 대화를 시작합니다. 무엇이든 편하게 물어보세요.';
-  ai.lastAiMsg = addMsg('ai', hello); aiSetState('인사하는 중…'); aiSetMode('speak');
-  ai.history = [{ role: 'user', parts: [{ text: '(대화 시작)' }] }, { role: 'model', parts: [{ text: hello }] }];
-  startReading(0, hello); aiBargeStart();
-}
-
-/* --- listening (Web Speech API, Korean) --- */
-function aiListen(auto) {
-  if (!ai.on || ai.busy || ai.listening || player.state !== 'idle') return;
-  if (!SRec) { aiSetState('이 브라우저는 음성 인식을 지원하지 않습니다. 아래 칸에 글로 입력하세요.'); return; }
-  aiStopBarge();
-  if (!auto) ai.retry = 0;
-  const r = new SRec(); r.lang = 'ko-KR'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
-  let fin = '', interim = '', err = '';
-  ai.heard = false;
-  r.onresult = e => {
-    interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t; else interim += t; }
-    ai.heard = true; setSubLine('🎙 ' + (fin + interim).trim()); aiSetState('듣는 중… 말이 끝나면 자동으로 답합니다.');
-  };
-  r.onerror = e => { err = e.error; };
-  r.onend = () => {
-    if (ai.rec !== r) return;
-    ai.rec = null; ai.listening = false;
-    if (!ai.on) return;
-    const q = (fin || interim).trim();
-    if (q && !r._cancel) { ai.retry = 0; aiSubmit(q); return; }
-    aiSetMode('idle');
-    if (err === 'not-allowed' || err === 'service-not-allowed') { aiSetState('마이크 권한이 필요합니다. 권한을 허용한 뒤 🎤를 누르세요.'); setSubLine('마이크 권한이 필요합니다.'); return; }
-    if (!r._cancel && ai.hands && (!err || err === 'no-speech') && ai.retry < 2) { ai.retry++; setTimeout(() => aiListen(true), 250); return; }
-    aiSetState(IDLE_HINT); renderSub(-1, true);
-  };
-  try { r.start(); } catch (e) {
-    if (!auto || !ai._startRetry) { ai._startRetry = true; setTimeout(() => { aiListen(true); }, 350); return; }   // previous recogniser still closing
-    ai._startRetry = false; aiSetState('음성 인식을 시작하지 못했습니다: ' + e.message); return;
-  }
-  ai._startRetry = false;
-  ai.rec = r; ai.listening = true; aiSetMode('listen');
-  aiSetState('듣고 있어요. 말씀하세요…'); setSubLine('🎙 듣는 중…');
-}
-function aiStopListen(cancel) {
-  const r = ai.rec; if (!r) return;
-  r._cancel = !!cancel; try { cancel ? r.abort() : r.stop(); } catch (e) {}
-}
-
-/* --- barge-in: keep an ear open while she thinks or talks ---
-   The phone speaker leaks her own voice into the mic, so anything that mostly
-   repeats the words she is saying is treated as echo, not as the user. */
-const normKo = t => String(t || '').toLowerCase().replace(/[^0-9a-z가-힣]/g, '');
-function isUserSpeech(seg, final) {
-  const n = normKo(seg);
-  if (n.length < 2 || (!final && n.length < 3)) return false;
-  if (ai.mode !== 'speak') return true;
-  const ref = normKo(player.text); if (!ref) return true;
-  let hit = 0, tot = 0;
-  for (let i = 0; i < n.length - 1; i++) { tot++; if (ref.includes(n.slice(i, i + 2))) hit++; }
-  return tot === 0 ? !ref.includes(n) : hit / tot < .5;
-}
-function aiBargeStart() {
-  if (!ai.on || !ai.barge || !SRec || ai.listening || ai.bargeRec) return;
-  if (ai.mode !== 'speak' && ai.mode !== 'think') return;
-  const r = new SRec(); r.lang = 'ko-KR'; r.interimResults = true; r.continuous = true; r.maxAlternatives = 1;
-  let hit = -1, text = '', endT = 0; const t0 = performance.now();
-  r.onresult = e => {
-    if (hit < 0) {
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (isUserSpeech(e.results[i][0].transcript, e.results[i].isFinal)) { hit = i; break; }
-      }
-      if (hit < 0) return;
-      ai.bargeRec = null; ai.rec = r; aiBargeHit();          // she stops; this recogniser becomes the main ear
-    }
-    let fin = true; text = '';
-    for (let i = hit; i < e.results.length; i++) { text += e.results[i][0].transcript; fin = e.results[i].isFinal; }
-    text = text.trim(); setSubLine('🎙 ' + text);
-    clearTimeout(endT); endT = setTimeout(() => { try { r.stop(); } catch (x) {} }, fin ? 800 : 1800);   // silence = done talking
-  };
-  r.onerror = e => { r._err = e.error; };
-  r.onend = () => {
-    clearTimeout(endT);
-    if (hit >= 0) {
-      if (ai.rec !== r) return;
-      ai.rec = null; ai.listening = false;
-      if (!ai.on) return;
-      if (text && !r._cancel) return aiSubmit(text);
-      aiSetMode('idle'); if (!r._cancel) aiListen(true);
-      return;
-    }
-    if (ai.bargeRec !== r) return;
-    ai.bargeRec = null;
-    if (/not-allowed/.test(r._err || '')) return;
-    if (ai.on && (ai.mode === 'speak' || ai.mode === 'think')) setTimeout(aiBargeStart, performance.now() - t0 < 800 ? 700 : 120);
-  };
-  try { r.start(); } catch (e) { return; }
-  ai.bargeRec = r;
-}
-function aiStopBarge() { const r = ai.bargeRec; if (!r) return; ai.bargeRec = null; try { r.abort(); } catch (e) {} }
-/** What she has actually said of the current answer so far. */
-function spokenSoFar() {
-  const ci = st.lastSeg && player.tl ? st.lastSeg.ci : -1;
-  return ci >= 0 && player.text ? player.text.slice(0, ci + 1).trim() : '';
-}
-function aiCutSpeech() {
-  if (ai.mode !== 'speak' && player.state === 'idle') return;
-  const said = spokenSoFar();
-  ai.pending = { kind: 'cut', said };
-  stopAll(true);
-  if (ai.lastAiMsg) { ai.lastAiMsg.lastChild.nodeValue = (said || '') + ' …(끊김)'; ai.lastAiMsg.classList.add('cut'); }
-}
-function aiCutThink() {
-  if (!ai.busy) return;
-  ai.pending = { kind: 'merge', q: ai.curQ };
-  ai.qTok++; try { ai.ctrl && ai.ctrl.abort(); } catch (e) {}
-  ai.busy = false;
-}
-function aiBargeHit() {
-  if (ai.mode === 'think') aiCutThink(); else aiCutSpeech();
-  ai.listening = true; ai.heard = true; aiSetMode('listen');
-  aiSetState('듣고 있어요… 말이 끝나면 이어서 답합니다.');
-}
-/** Stop listening / thinking (not the voice). */
-function aiHalt() {
-  ai.qTok = (ai.qTok || 0) + 1;
-  try { ai.ctrl && ai.ctrl.abort(); } catch (e) {}
-  ai.busy = false; ai.pending = null;
-  aiStopBarge(); aiStopListen(true); ai.rec = null; ai.listening = false;
-  aiSetMode('idle'); if (ai.on) aiSetState(IDLE_HINT);
+  toast('AI와 대화를 시작합니다'); setSubLine('AI와 대화를 시작합니다');
+  liveGo();
 }
 function aiMicPress() {
   if (!ai.on) return;
-  if (ai.listening) return aiStopListen(false);               // tap again = "I'm done talking"
-  const hadEar = !!ai.bargeRec; aiStopBarge();
-  if (ai.busy) aiCutThink();
-  else if (player.state !== 'idle') aiCutSpeech();            // cut her off, keep what she said as context
-  aiSetMode('idle');
-  if (hadEar) setTimeout(() => aiListen(false), 250); else aiListen(false);
+  if (!live.ready) { if (live.state !== 'connecting') liveGo(); return; }
+  live.mute(!live.muted); toast(live.muted ? '마이크를 껐습니다.' : '마이크를 켰습니다.');
 }
-function aiAfterSpeak() {
-  aiStopBarge(); aiSetMode('idle');
-  if (ai.hands) { aiSetState('곧 다시 듣습니다…'); setTimeout(() => { if (ai.on && player.state === 'idle' && !ai.busy && !ai.listening) aiListen(true); }, 450); }
-  else aiSetState(IDLE_HINT);
-}
-
-/* --- thinking (Gemini generateContent) --- */
-function aiSystem() {
-  const d = new Date();
-  return [
-    '당신은 K-ANCHOR의 AI 아나운서 "하나(HANA)"입니다. 지금 사용자와 얼굴을 마주 보고 음성으로 실시간 대화하고 있습니다. 사용자는 화면 속 당신의 3D 얼굴을 보고 있습니다.',
-    `오늘은 ${d.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}, 현재 시각은 ${d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}입니다.`,
-    '답변은 그대로 소리 내어 읽힙니다. 마크다운, 목록 기호, 표, 이모지, 링크, 괄호 속 부연 설명을 쓰지 마세요.',
-    '방송 아나운서처럼 또렷하고 따뜻한 존댓말 구어체로, 핵심부터 보통 2~4문장, 길어도 6문장 이내로 말하세요. 사용자가 자세히 원할 때만 길게 설명하세요.',
-    '음성 인식 때문에 질문이 조금 어색해도 가장 그럴듯한 뜻으로 이해하고 답하세요.',
-    '사용자가 당신의 대답 도중 말을 끊으면 "(대답 도중 끼어들어 한 말)"로 표시됩니다. 끊긴 대답과 새 말을 함께 이해해서 자연스럽게 이어 답하세요. 이미 한 말은 반복하지 말고, 새 말이 앞 이야기와 이어지면 둘을 같이 답하세요.',
-    '"(이어서 덧붙인 말)"이 있으면 앞 질문과 덧붙인 말을 하나의 요청으로 보고 함께 답하세요.',
-    '얼굴 동작: 당신은 시선, 고개, 표정, 눈, 입을 실제로 움직일 수 있습니다. 사용자가 그런 동작을 시키면 답변 맨 앞에 [[동작: id, id]] 태그를 붙이세요. 태그는 소리 내어 읽히지 않습니다.',
-    'id 목록: look_left, look_right, look_up, look_down, look_front(정면 보기), eyes_left, eyes_right, eyes_up, eyes_down(눈만 움직이기), head_down(고개 숙이기), head_up(고개 들기), head_turn_left, head_turn_right(고개 돌리기), head_tilt_left, head_tilt_right(고개 갸웃), nod(끄덕), shake(도리도리), smile, laugh(크게 웃기), shy(수줍게), sad, cry(울기), angry, surprise, wink, blink, eyes_close, eyes_open, mouth_open, mouth_close, pout(뽀뽀하는 입), neutral(표정만 원래대로), reset(시선·고개·표정 모두 원래대로).',
-    'left/right는 사용자가 보는 화면 기준입니다. 사용자가 "네 오른쪽"처럼 당신 몸 기준을 말하면 반대쪽 id를 쓰세요. "더", "많이"처럼 정도를 키우면 id 뒤에 :2 또는 :3을 붙이세요(예: head_down:2).',
-    '동작 지시에는 "네, 오른쪽을 볼게요."처럼 한 문장 이하로 짧게 답하세요. 입을 다물라는 지시처럼 말을 하면 어색한 경우에는 태그만 쓰고 말은 하지 마세요. 울거나 웃으라는 지시에는 그 감정에 어울리는 짧은 말을 해도 좋습니다.',
-    '동작은 다음 지시가 있을 때까지 유지됩니다. "원래대로", "그만", "평소처럼"을 요청하면 reset을 쓰세요. 동작 지시가 없으면 태그를 쓰지 마세요.',
-    ai.search ? '최신 정보가 필요하면 검색 결과를 바탕으로 정확하게 답하세요.' : '확인할 수 없는 최신 소식이나 실시간 정보는 지어내지 말고, 정확히 알 수 없다고 솔직하게 말하세요.',
-  ].join('\n');
-}
-function cleanSpoken(t) {
-  return String(t || '')
-    .replace(/```[\s\S]*?```/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '')
-    .replace(/^\s{0,3}(#{1,6}|[-*•·]|\d+[.)])\s+/gm, '').replace(/[*_`~#>|]/g, '')
-    .replace(/\p{Extended_Pictographic}|️/gu, '').replace(/[ \t]+/g, ' ').replace(/ +([.,!?])/g, '$1').replace(/\n{2,}/g, '\n').trim();
-}
-async function aiGenerate(userText) {
-  const userTurn = { role: 'user', parts: [{ text: userText }] };
-  let hist = ai.history.slice(-18); while (hist.length && hist[0].role !== 'user') hist.shift();
-  const ctrl = ai.ctrl = new AbortController();
-  const body = { systemInstruction: { parts: [{ text: aiSystem() }] }, contents: [...hist, userTurn],
-    generationConfig: { temperature: .8, maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 0 } } };
-  if (ai.search) body.tools = [{ google_search: {} }];
-  const post = async () => {
-    const res = await fetch(`${GAPI}/models/${encodeURIComponent(ai.model)}:generateContent`, { method: 'POST', signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': ai.key }, body: JSON.stringify(body) });
-    return { res, j: await res.json().catch(() => ({})) };
-  };
-  let { res, j } = await post();
-  const msg = () => (j.error && j.error.message) || '';
-  if (res.status === 400 && /thinking|budget/i.test(msg())) { delete body.generationConfig.thinkingConfig; ({ res, j } = await post()); }   // model that must think
-  if (res.status === 400 && body.tools) { delete body.tools; ({ res, j } = await post()); }                                               // model without search
-  if (!res.ok) throw new Error(msg() || ('HTTP ' + res.status));
-  const parts = (j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts) || [];
-  const raw = parts.filter(p => !p.thought && typeof p.text === 'string').map(p => p.text).join('');
-  const { acts, text: rest } = parseActs(raw);
-  const say = cleanSpoken(rest);
-  if (!say && !acts.length) throw new Error(j.promptFeedback && j.promptFeedback.blockReason ? '이 질문에는 답할 수 없습니다.' : '빈 답변을 받았습니다. 다시 말씀해 주세요.');
-  const tag = acts.length ? `[[동작: ${acts.map(a => a.id + (a.n > 1 ? ':' + a.n : '')).join(', ')}]] ` : '';
-  ai.history = [...hist, userTurn, { role: 'model', parts: [{ text: (tag + say).trim() }] }];
-  return { say, acts };
-}
-async function aiSubmit(q) {
-  if (!ai.on) return;
-  aiStopBarge();
-  const pend = ai.pending; ai.pending = null;
-  let userText = q;
-  if (pend && pend.kind === 'merge' && pend.q) userText = `${pend.q}\n(이어서 덧붙인 말) ${q}`;
-  if (pend && pend.kind === 'cut') {
-    const h = ai.history, last = h[h.length - 1];
-    if (last && last.role === 'model') {
-      const tag = (last.parts[0].text.match(/^\[\[[^\]]*\]\]\s*/) || [''])[0];
-      last.parts = [{ text: tag + (pend.said ? pend.said + ' …' : '') + '(여기까지 말했을 때 사용자가 말을 끊었습니다)' }];
-    }
-    userText = `(대답 도중 끼어들어 한 말) ${q}`;
-  }
-  const tok = ai.qTok = (ai.qTok || 0) + 1;
-  ai.curQ = userText;
-  addMsg('me', q); ai.busy = true; aiSetMode('think'); aiSetState('생각하는 중…'); setSubLine('🎙 ' + q);
-  aiBargeStart();                                              // more words while she thinks are merged in
-  let out;
-  try { out = await aiGenerate(userText); }
-  catch (e) {
-    if (tok !== ai.qTok) return;
-    ai.busy = false; aiStopBarge(); aiSetMode('idle');
-    if (e.name === 'AbortError') return;
-    addMsg('err', '오류: ' + aiErrText(e.message)); aiSetState('🎤를 눌러 다시 말씀하세요.'); setSubLine('답변을 가져오지 못했습니다.'); return;
-  }
-  if (tok !== ai.qTok || !ai.on) return;
-  ai.busy = false;
-  applyActs(out.acts, !!out.say);
-  const m = addMsg('ai', out.say || '');
-  if (out.acts.length) { const a = document.createElement('span'); a.className = 'act'; a.textContent = '▸ ' + out.acts.map(x => ACTS[x.id].ko).join(' · '); m.insertBefore(a, m.firstChild); }
-  if (!out.say) { m.lastChild.nodeValue = ''; aiStopBarge(); player.text = ''; renderSub(-1, true); aiAfterSpeak(); return; }
-  ai.lastAiMsg = m;
-  aiSetMode('speak'); aiSetState('대답하는 중… 그냥 말하면 끊고 이어서 답합니다.');
-  startReading(0, out.say);
-  aiBargeStart();
+function aiSendText() {
+  const v = $('aiText').value.trim(); if (!v || !ai.on) return;
+  if (!live.ready) return toast('아직 연결되지 않았습니다.');
+  $('aiText').value = ''; liveOnInterrupt(live.speaking); live.text(v);
 }
 
 /* --- wiring --- */
@@ -1708,28 +1745,23 @@ $('btnAI').onclick = aiToggle;
 $('aiConnect').onclick = aiConnect;
 $('aiKey').addEventListener('keydown', e => { if (e.key === 'Enter') aiConnect(); });
 $('aiMic').onclick = aiMicPress;
-function aiSendText() {
-  const v = $('aiText').value.trim(); if (!v || !ai.on) return; $('aiText').value = '';
-  aiStopBarge(); if (ai.busy) aiCutThink(); else if (player.state !== 'idle') aiCutSpeech();
-  aiStopListen(true); ai.rec = null; ai.listening = false; aiSubmit(v);
-}
 $('aiSend').onclick = aiSendText;
 $('aiText').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) aiSendText(); });
-ai.hands = store.get('aiHands', 'on') === 'on'; $('aiHands').checked = ai.hands;
-$('aiHands').onchange = e => { ai.hands = e.target.checked; store.set('aiHands', ai.hands ? 'on' : 'off'); };
-ai.search = store.get('aiSearch', 'off') === 'on'; $('aiSearch').checked = ai.search;
-$('aiSearch').onchange = e => { ai.search = e.target.checked; store.set('aiSearch', ai.search ? 'on' : 'off'); };
-ai.barge = store.get('aiBarge', 'on') === 'on'; $('aiBarge').checked = ai.barge;
-$('aiBarge').onchange = e => { ai.barge = e.target.checked; store.set('aiBarge', ai.barge ? 'on' : 'off'); if (!ai.barge) aiStopBarge(); else aiBargeStart(); };
 $('aiCtlReset').onclick = () => { ctlReset(); toast('표정과 자세를 원래대로 돌렸습니다.'); };
-$('aiModel').onchange = e => { ai.model = e.target.value; store.set('aiModel', ai.model); };
-$('aiReset').onclick = () => { ai.history = []; $('chatLog').textContent = ''; toast('대화 기록을 지웠습니다.'); };
+$('aiVoice').value = store.get('liveVoice', 'Kore');
+$('aiVoice').onchange = e => { store.set('liveVoice', e.target.value); if (ai.on) { toast('목소리를 바꿔 다시 연결합니다.'); liveGo(); } };
+const sensShow = () => { $('aiSensV').textContent = (+$('aiSens').value).toFixed(3); };
+$('aiSens').value = store.get('liveSens', '0.025'); sensShow();
+$('aiSens').oninput = () => { live.threshold = +$('aiSens').value; store.set('liveSens', $('aiSens').value); sensShow(); };
+$('aiModel').onchange = e => { ai.model = e.target.value; store.set('liveModel', ai.model); if (ai.on) { toast('모델을 바꿔 다시 연결합니다.'); liveGo(); } };
+$('aiReset').onclick = () => { if (!ai.on) return; bubbles.clear(); $('chatLog').textContent = ''; ctlReset(); toast('대화를 새로 시작합니다.'); liveGo(); };
+window.addEventListener('pagehide', () => { if (ai.on) live.close(true); });
 
 /* test hook (used by automated checks) */
 window.__anchor = { buildTimeline, splitSentences, numKo, sampleTimeline, alignTimeline, sentenceMood, face, st, player, VIS,
   setTest(v, mood) { st.test = v; st.testUntil = 1e9; st.testMood = mood || null; st.testMoodUntil = mood ? 1e9 : 0; },
   setCam, startReading, stopAll, camera, scene, get avatar() { return avatar; },
-  ai, aiToggle, aiConnect, aiSubmit, aiMicPress, aiClose, rankModels, cleanSpoken, ctl, ACTS, parseActs, applyActs, ctlReset, tears, isUserSpeech };
+  ai, live, aiToggle, aiConnect, aiMicPress, aiClose, rankLive, liveSetup, livePerform, ctl, ACTS, parseActs, applyActs, ctlReset, tears };
 </script>
 </body>
 </html>
