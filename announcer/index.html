@@ -1425,21 +1425,33 @@ function liveSystem() {
     '동작은 다음 지시까지 유지됩니다. "원래대로", "그만", "평소처럼"은 reset입니다. 입을 다물라는 지시에는 대답하지 말고 동작만 하세요.',
   ].join('\n');
 }
-function liveSetup(model, voice) {
+/* Connection profiles, tried in order when the server rejects a session before it ever answers.
+   The first is the full feature set; the second is exactly GPT-face's known-good setup. */
+const LIVE_PROFILES = [
+  { greet: true,  textVia: 'client',   tools: 'full', model: null },
+  { greet: false, textVia: 'realtime', tools: 'full', model: LIVE_DEFAULT },
+  { greet: false, textVia: 'realtime', tools: 'fn',   model: LIVE_DEFAULT },
+  { greet: false, textVia: 'realtime', tools: 'none', model: LIVE_DEFAULT },
+];
+function liveSetup(model, voice, prof = LIVE_PROFILES[0]) {
   const ids = Object.keys(ACTS);
-  return { setup: {
+  const fn = { functionDeclarations: [{ name: 'perform_action', description: 'HANA의 시선·고개·표정·눈·입 동작을 실행합니다. 실행 여부는 반환 결과를 따르세요.',
+    parameters: { type: 'OBJECT', properties: {
+      actions: { type: 'ARRAY', items: { type: 'STRING', enum: ids } },
+      intensity: { type: 'NUMBER', description: '정도 1~3, 기본 1' } }, required: ['actions'] } }] };
+  const tools = prof.tools === 'full' ? [{ googleSearch: {} }, fn] : prof.tools === 'fn' ? [fn] : null;
+  const sys = liveSystem() + (prof.tools === 'full' ? '' : '\n지금은 검색 도구가 꺼져 있습니다. 최신 정보는 정확히 알 수 없다고 솔직하게 말하세요.')
+    + (prof.tools === 'none' ? '\n지금은 얼굴 동작 도구가 꺼져 있습니다. 동작 요청에는 지금은 할 수 없다고 말하세요.' : '');
+  const setup = {
     model: 'models/' + model.replace(/^models\//, ''),
     generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } } },
-    systemInstruction: { parts: [{ text: liveSystem() }] },
+    systemInstruction: { parts: [{ text: sys }] },
     inputAudioTranscription: {}, outputAudioTranscription: {},
     realtimeInputConfig: { automaticActivityDetection: { disabled: true }, activityHandling: 'START_OF_ACTIVITY_INTERRUPTS', turnCoverage: 'TURN_INCLUDES_ONLY_ACTIVITY' },
     contextWindowCompression: { slidingWindow: {} }, sessionResumption: {},
-    tools: [{ googleSearch: {} }, { functionDeclarations: [{ name: 'perform_action',
-      description: 'HANA의 시선·고개·표정·눈·입 동작 실행. ' + ids.map(i => `${i}=${ACTS[i].ko}`).join(', '),
-      parameters: { type: 'OBJECT', properties: {
-        actions: { type: 'ARRAY', items: { type: 'STRING', enum: ids } },
-        intensity: { type: 'NUMBER', description: '정도 1~3 (기본 1)' } }, required: ['actions'] } }] }],
-  } };
+  };
+  if (tools) setup.tools = tools;
+  return { setup };
 }
 
 /** Live session: mic → server; server audio → speaker + lips. */
@@ -1449,8 +1461,9 @@ const live = {
   threshold: .025, analyser: null, wave: null, spec: null, calls: new Set(), canceled: new Set(), greeted: false,
   emit(s) { this.state = s; liveOnState(s); },
   send(v) { if (this.ws && this.ws.readyState === 1) { this.ws.send(JSON.stringify(v)); return true; } return false; },
-  async connect({ key, model, voice }) {
+  async connect({ key, model, voice, prof }) {
     this.close(true); const ep = ++this.epoch; this.closed = false;
+    this.prof = prof; this.phase = 'setup'; this.okTurns = 0; this.openedAt = performance.now();
     this.calls.clear(); this.canceled.clear(); this.inputText = ''; this.outputText = ''; this.blockOutput = false; this.userActive = false; this.pre = []; this.greeted = false;
     this.emit('connecting');
     this.timer = setTimeout(() => this.fail('연결 시간 초과: API 키, 모델 접근 권한과 네트워크를 확인해 주세요.'), 30000);
@@ -1470,12 +1483,12 @@ const live = {
       this.mic.connect(this.rec); this.rec.connect(this.silent).connect(ctx.destination);
       this.rec.port.onmessage = e => { if (ep === this.epoch) this.capture(new Float32Array(e.data)); };
       const ws = this.ws = new WebSocket(LIVE_WS + '?key=' + encodeURIComponent(key));
-      ws.onopen = () => { if (ep === this.epoch) this.send(liveSetup(model, voice)); };
+      ws.onopen = () => { if (ep === this.epoch) this.send(liveSetup(model, voice, prof)); };
       let chain = Promise.resolve();
       ws.onmessage = e => { chain = chain.then(async () => { if (ep !== this.epoch) return; const raw = typeof e.data === 'string' ? e.data : await e.data.text(); if (ep === this.epoch) this.handle(JSON.parse(raw)); })
         .catch(() => { if (ep === this.epoch) this.fail('음성 이벤트를 처리하지 못했습니다. 다시 연결해 주세요.'); }); };
       ws.onerror = () => { if (ep === this.epoch) this.fail('Gemini에 연결하지 못했습니다. API 키와 네트워크를 확인해 주세요.'); };
-      ws.onclose = e => { if (ep === this.epoch && !this.closed) this.fail('Gemini 연결 종료' + (e.code ? ' (' + e.code + (e.reason ? ': ' + e.reason : '') + ')' : '') + '. API 키·모델 접근 권한·사용 한도를 확인해 주세요.'); };
+      ws.onclose = e => { if (ep === this.epoch && !this.closed) liveClosed(e.code, e.reason || ''); };
     } catch (e) { if (ep === this.epoch) this.fail(e.name === 'NotAllowedError' ? '마이크 권한을 허용해 주세요.' : e.message); }
   },
   /** Local voice-activity detection: 80 ms of voice starts a turn (and cuts her off), 850 ms of quiet ends it. */
@@ -1498,7 +1511,7 @@ const live = {
   },
   handle(e) {
     if (e.error) return this.fail(e.error.message || 'Gemini API 오류');
-    if (e.setupComplete) { clearTimeout(this.timer); this.ready = true; this.emit('connected'); return; }
+    if (e.setupComplete) { clearTimeout(this.timer); this.ready = true; this.phase = 'ready'; this.emit('connected'); return; }
     if (e.goAway) liveNotice('음성 세션이 곧 종료됩니다. 끊기면 🎤를 눌러 다시 연결하세요.');
     for (const id of (e.toolCallCancellation && e.toolCallCancellation.ids) || []) this.canceled.add(id);
     const s = e.serverContent;
@@ -1516,7 +1529,8 @@ const live = {
         }
         if (s.groundingMetadata) liveSources(s.groundingMetadata, this.turn);
       }
-      if (s.turnComplete) { this.serverDone = true; if (!this.nodes.size && !this.userActive) this.emit('connected'); }
+      if (s.modelTurn || s.outputTranscription) this.gotReply = true;
+      if (s.turnComplete) { this.serverDone = true; if (this.gotReply) { this.okTurns++; liveWorked(); } this.gotReply = false; if (!this.nodes.size && !this.userActive) this.emit('connected'); }
     }
     if (e.toolCall) {
       const responses = [];
@@ -1548,7 +1562,9 @@ const live = {
     if (!this.ready) return false;
     this.clearAudio(); this.userActive = false; this.blockOutput = false; this.turn++; this.outputText = '';
     if (!silentUser) liveTranscript('me', t, this.turn);
-    this.send({ realtimeInput: { activityStart: {} } }); this.send({ realtimeInput: { text: t } }); this.send({ realtimeInput: { activityEnd: {} } });
+    if (this.prof && this.prof.textVia === 'realtime') { this.send({ realtimeInput: { activityStart: {} } }); this.send({ realtimeInput: { text: t } }); this.send({ realtimeInput: { activityEnd: {} } }); }
+    else this.send({ clientContent: { turns: [{ role: 'user', parts: [{ text: t }] }], turnComplete: true } });
+    this.phase = silentUser ? 'greeting' : 'talk';
     this.emit('thinking'); return true;
   },
   mute(v) {
@@ -1652,7 +1668,7 @@ function liveOnState(s) {
   const mic = $('aiMic');
   mic.classList.toggle('on', s === 'listening'); mic.classList.toggle('think', mode === 'think'); mic.classList.toggle('speak', s === 'speaking');
   mic.classList.toggle('muted', live.muted); mic.textContent = live.muted ? '🔇' : (s === 'error' ? '🔄' : '🎤');
-  if (s === 'connected' && ai.on && !live.greeted) {          // first contact: she greets on her own
+  if (s === 'connected' && ai.on && !live.greeted && live.prof && live.prof.greet) {          // first contact: she greets on her own
     live.greeted = true; ai.hideTurn = null;
     live.text('(대화가 연결됨) 사용자에게 "AI와 대화를 시작합니다"라고 말하며 한두 문장으로 짧게 인사하고, 무엇이든 물어보라고 해 주세요.', true);
   }
@@ -1698,8 +1714,8 @@ function rankLive(models) {
   const names = models.filter(m => (m.supportedGenerationMethods || []).includes('bidiGenerateContent') || /live|native-audio/.test(m.name))
     .map(m => m.name.replace(/^models\//, '')).filter(n => /^gemini-/.test(n));
   const score = n => (n === LIVE_DEFAULT ? 1e4 : 0) + parseFloat((n.match(/^gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0) * 10 + (/live/.test(n) ? 5 : 0) - (/preview|exp/.test(n) ? 3 : 0);
-  const out = [...new Set(names)].sort((a, b) => score(b) - score(a));
-  return out.length ? out : [LIVE_DEFAULT];
+  // GPT-face's known-good model always comes first; anything else only if the user picks it
+  return [LIVE_DEFAULT, ...[...new Set(names)].filter(n => n !== LIVE_DEFAULT).sort((a, b) => score(b) - score(a))];
 }
 async function aiConnect() {
   const key = $('aiKey').value.trim();
@@ -1713,7 +1729,7 @@ async function aiConnect() {
     if (!ai.open) return;                                      // closed while checking
     ai.key = key; store.set('aiKey', key);
     if (!$('gemKey').value.trim()) { $('gemKey').value = key; store.set('gemKey', key); }
-    const saved = store.get('liveModel', ''); ai.model = ranked.includes(saved) ? saved : ranked[0];
+    const saved = store.get('liveModel', ''); ai.model = saved && ranked.includes(saved) ? saved : LIVE_DEFAULT;
     const sel = $('aiModel'); sel.textContent = '';
     for (const n of ranked) { const o = document.createElement('option'); o.value = o.textContent = n; sel.appendChild(o); }
     sel.value = ai.model;
@@ -1721,7 +1737,33 @@ async function aiConnect() {
   } catch (e) { $('aiErr').textContent = '연결 실패: ' + aiErrText(e.message); }
   finally { $('aiConnect').disabled = false; $('aiConnect').textContent = '연결'; }
 }
-function liveGo() { live.threshold = +$('aiSens').value; live.connect({ key: ai.key, model: ai.model, voice: $('aiVoice').value }); }
+function liveGo(keepProfile) {
+  if (!keepProfile) ai.profile = clamp(+store.get('liveProfile', 0) || 0, 0, LIVE_PROFILES.length - 1);
+  const prof = LIVE_PROFILES[ai.profile];
+  live.threshold = +$('aiSens').value;
+  live.connect({ key: ai.key, model: prof.model || ai.model, voice: $('aiVoice').value, prof });
+}
+/** A session answered at least once: remember this profile as the one to start with. */
+function liveWorked() { if (store.get('liveProfile', '0') !== String(ai.profile)) store.set('liveProfile', String(ai.profile)); ai.recover = 0; }
+/** Server closed the socket: step down to a simpler setup if it never worked, or reconnect once if it dropped mid-talk. */
+function liveClosed(code, reason) {
+  const where = live.phase === 'setup' ? '연결 설정 단계' : live.phase === 'greeting' ? '첫 인사 요청 직후' : '대화 도중';
+  const detail = `(${code}${reason ? ': ' + reason : ''}) · ${where} · 모델 ${(live.prof && live.prof.model) || ai.model}`;
+  console.warn('[live] closed', detail);
+  const neverWorked = !live.okTurns;
+  if (ai.on && neverWorked && /^(1007|1008|1011)$/.test(String(code)) && ai.profile < LIVE_PROFILES.length - 1) {
+    ai.profile++; live.close(true);
+    const step = ['', 'GPT-face와 같은 기본 설정', '검색 도구 없이', '도구 없이'][ai.profile];
+    addMsg('err', `연결이 거부되어 설정을 바꿔 다시 연결합니다 → ${step} (${ai.profile + 1}/${LIVE_PROFILES.length}) ${detail}`);
+    setTimeout(() => { if (ai.on) liveGo(true); }, 400); return;
+  }
+  if (ai.on && !neverWorked && (ai.recover || 0) < 2) {      // e.g. a search request that kills the session
+    ai.recover = (ai.recover || 0) + 1; live.close(true);
+    addMsg('err', `연결이 끊겨 다시 연결합니다 ${detail}`);
+    setTimeout(() => { if (ai.on) liveGo(true); }, 400); return;
+  }
+  live.fail(`Gemini 연결 종료 ${detail}. ` + (neverWorked ? '이 키로 Live 모델을 쓸 수 없거나 사용 한도에 걸렸을 수 있습니다. AI Studio에서 키의 프로젝트와 결제/한도를 확인해 주세요.' : '🎤를 눌러 다시 연결하세요.'));
+}
 function aiStart() {
   ai.on = true; bubbles.clear(); $('chatLog').textContent = ''; ctlReset(); stopAll(true);
   document.body.classList.add('ai-on'); $('btnAI').classList.remove('open'); $('btnAI').classList.add('on');
@@ -1731,7 +1773,7 @@ function aiStart() {
 }
 function aiMicPress() {
   if (!ai.on) return;
-  if (!live.ready) { if (live.state !== 'connecting') liveGo(); return; }
+  if (!live.ready) { if (live.state !== 'connecting') { ai.recover = 0; liveGo(); } return; }
   live.mute(!live.muted); toast(live.muted ? '마이크를 껐습니다.' : '마이크를 켰습니다.');
 }
 function aiSendText() {
@@ -1753,7 +1795,7 @@ $('aiVoice').onchange = e => { store.set('liveVoice', e.target.value); if (ai.on
 const sensShow = () => { $('aiSensV').textContent = (+$('aiSens').value).toFixed(3); };
 $('aiSens').value = store.get('liveSens', '0.025'); sensShow();
 $('aiSens').oninput = () => { live.threshold = +$('aiSens').value; store.set('liveSens', $('aiSens').value); sensShow(); };
-$('aiModel').onchange = e => { ai.model = e.target.value; store.set('liveModel', ai.model); if (ai.on) { toast('모델을 바꿔 다시 연결합니다.'); liveGo(); } };
+$('aiModel').onchange = e => { ai.model = e.target.value; store.set('liveModel', ai.model === LIVE_DEFAULT ? '' : ai.model); store.set('liveProfile', '0'); if (ai.on) { toast('모델을 바꿔 다시 연결합니다.'); liveGo(); } };
 $('aiReset').onclick = () => { if (!ai.on) return; bubbles.clear(); $('chatLog').textContent = ''; ctlReset(); toast('대화를 새로 시작합니다.'); liveGo(); };
 window.addEventListener('pagehide', () => { if (ai.on) live.close(true); });
 
