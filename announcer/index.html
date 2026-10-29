@@ -175,7 +175,7 @@ body.ai-on #cardScript,body.ai-on #cardRec{display:none}
         <input type="text" id="aiText" placeholder="글로 물어봐도 됩니다" enterkeyhint="send">
         <button id="aiSend" style="flex:0 0 auto">보내기</button>
       </div>
-      <div class="hint">그냥 말을 걸면 됩니다. HANA가 말하는 도중에 말하면 바로 멈추고 듣습니다.<br>
+      <div class="hint">그냥 말을 걸면 됩니다. HANA가 말하는 도중에 말하면 바로 멈추고 듣습니다. 대화 중에는 화면이 꺼지지 않고, 1분간 대화가 없으면 원래대로 꺼집니다.<br>
         "오른쪽 봐" · "고개 숙여" · "웃어봐" · "울어봐" · "입 다물어" · "윙크해" · "원래대로" · "오늘 날씨 검색해 줘"</div>
       <button id="aiCtlReset" style="margin-top:8px;width:100%">표정 · 자세 원래대로</button>
       <details style="margin-top:10px"><summary>대화 설정</summary>
@@ -1089,11 +1089,13 @@ function update(dt, T) {
   let aiMood = null;
   if (ai.on && player.state === 'idle') {
     if (ai.mode === 'listen') {
-      aiMood = 'listen';
+      aiMood = ai.userMood === 'concern' ? 'concern' : 'listen';
       st.aiNodT = (st.aiNodT || 0) - dt;
       if (st.aiNodT <= 0) { st.aiNodT = 1.8 + Math.random() * 2.4; if (ai.heard) st.nodV -= .35 + Math.random() * .35; }
+    } else if (ai.mode === 'idle' && live.ready) {
+      aiMood = 'listen';                                   // waiting for the user: soft, attentive face
     } else if (ai.mode === 'think') {
-      aiMood = 'think';
+      aiMood = ai.userMood === 'concern' ? 'concern' : 'think';
       st.aiThinkT = (st.aiThinkT || 0) - dt;
       if (st.aiThinkT <= 0 && !ctlLooking()) { st.aiThinkT = .9 + Math.random() * 1.3; st.gaze.tx = .07 + Math.random() * .05; st.gaze.ty = -.05 - Math.random() * .03; st.gaze.next = 9; }
     }
@@ -1118,6 +1120,7 @@ function update(dt, T) {
   st.smileW = lerp(st.smileW || 0, ui.smile ? 1 : 0, 1 - Math.exp(-dt / .4));   // gentle resting smile on top of any mood
   if (st.smileW > .001) { const sw = st.smileW * (st.mood === 'concern' || st.mood === 'serious' || /sad|cry|angry/.test(ctl.expr || '') ? (ctl.expr ? 0 : .35) : 1);
     faceTarget.mouthSmileL += .26 * sw; faceTarget.mouthSmileR += .26 * sw; faceTarget.eyeSquint += .1 * sw; }
+  if (st.reactSmile > 0) { st.reactSmile -= dt; if (!ctl.expr) { const w = Math.sin(clamp(st.reactSmile / 1.2) * Math.PI) * .55; faceTarget.mouthSmileL += w; faceTarget.mouthSmileR += w; faceTarget.eyeSquint += w * .3; } }
   const smileDamp = clamp(1 - (vis.mouthPucker || 0) * .8);
   faceTarget.mouthSmileL *= smileDamp; faceTarget.mouthSmileR *= smileDamp;
   faceTarget.browUp += st.browPulse * .28 * (st.mood === 'concern' ? 0 : 1);
@@ -1454,10 +1457,31 @@ function liveSetup(model, voice, prof = LIVE_PROFILES[0]) {
   return { setup };
 }
 
+/** Is this 40 ms mic chunk a human voice? Speech-band share (150–3400 Hz) + pitch periodicity (80–400 Hz).
+   Knocks, claps, clatter and rumble fail one of the two; vowels pass both. Filter state carries across chunks. */
+const vf = { hpY: 0, hpX: 0, lpY: 0, buf: new Float32Array(640) };
+function voiceFeat(x) {
+  const dt = 1 / 16000, rcH = 1 / (2 * Math.PI * 150), rcL = 1 / (2 * Math.PI * 3400), a = rcH / (rcH + dt), b = dt / (rcL + dt);
+  const y = vf.buf; let et = 0, eb = 0;
+  for (let i = 0; i < x.length; i++) {
+    vf.hpY = a * (vf.hpY + x[i] - vf.hpX); vf.hpX = x[i];       // high-pass 150 Hz
+    vf.lpY += b * (vf.hpY - vf.lpY);                              // low-pass 3.4 kHz
+    y[i] = vf.lpY; et += x[i] * x[i]; eb += vf.lpY * vf.lpY;
+  }
+  const band = et > 1e-12 ? eb / et : 0;
+  let per = 0; const N = x.length;
+  if (eb > 1e-9) for (let l = 40; l <= 200; l += 2) {             // normalised autocorrelation at pitch lags
+    let c = 0, e1 = 0, e2 = 0;
+    for (let i = 0; i + l < N; i += 2) { const u = y[i], v = y[i + l]; c += u * v; e1 += u * u; e2 += v * v; }
+    const r = c / Math.sqrt(e1 * e2 + 1e-12); if (r > per) per = r;
+  }
+  return { band, per };
+}
+
 /** Live session: mic → server; server audio → speaker + lips. */
 const live = {
   ws: null, ready: false, state: 'closed', epoch: 0, nodes: new Set(), nextTime: 0, speaking: false, userActive: false,
-  blockOutput: false, muted: false, pre: [], above: 0, lastVoice: 0, turn: 0, inputText: '', outputText: '', serverDone: true,
+  blockOutput: false, muted: false, pre: [], above: 0, lastVoice: 0, sp: 0, quiet: 0, noise: .004, pauseNod: true, turn: 0, inputText: '', outputText: '', serverDone: true,
   threshold: .025, analyser: null, wave: null, spec: null, calls: new Set(), canceled: new Set(), greeted: false,
   emit(s) { this.state = s; liveOnState(s); },
   send(v) { if (this.ws && this.ws.readyState === 1) { this.ws.send(JSON.stringify(v)); return true; } return false; },
@@ -1491,21 +1515,35 @@ const live = {
       ws.onclose = e => { if (ep === this.epoch && !this.closed) liveClosed(e.code, e.reason || ''); };
     } catch (e) { if (ep === this.epoch) this.fail(e.name === 'NotAllowedError' ? '마이크 권한을 허용해 주세요.' : e.message); }
   },
-  /** Local voice-activity detection: 80 ms of voice starts a turn (and cuts her off), 850 ms of quiet ends it. */
+  /** Local voice-activity detection. A turn starts only on ~0.2 s of sound that is loud enough above the room's
+     own noise floor AND looks like a voice (speech band + pitch); she gets a stricter test while she is talking,
+     because her own voice leaks back from the speaker. 850 ms of quiet ends the turn. */
   capture(samples) {
     if (!this.ready || this.muted) return;
     let p = 0; for (const v of samples) p += v * v; const rms = Math.sqrt(p / samples.length), now = performance.now();
-    this.micLevel = rms;
+    const f = voiceFeat(samples);
+    this.micLevel = rms; this.feat = f;
     const packet = { audio: { data: pcmBase64(samples), mimeType: 'audio/pcm;rate=16000' } };
-    this.pre.push(packet); if (this.pre.length > 8) this.pre.shift();          // 320 ms pre-roll so the first syllable isn't lost
-    if (rms > this.threshold) { this.above += samples.length / 16000; this.lastVoice = now; } else this.above = 0;
-    if (!this.userActive && this.above >= .08) {
+    this.pre.push(packet); if (this.pre.length > 10) this.pre.shift();         // 400 ms pre-roll so the first syllable isn't lost
+    const base = Math.max(this.threshold, this.noise * 3);                      // adapts to a noisy room
+    const thr = base * (this.speaking ? 1.8 : 1);
+    const voice = rms > thr && f.band > .4 && f.per > .45;
+    if (!this.userActive) {
+      // room noise floor: falls fast, rises slowly and only on non-voice sound
+      if (rms < this.noise) this.noise += (rms - this.noise) * .3; else if (!voice) this.noise += (rms - this.noise) * .015;
+      this.noise = clamp(this.noise, .002, .05);
+      if (voice) { this.sp += .04; this.quiet = 0; } else { this.sp = Math.max(0, this.sp - .02); if (rms < thr * .5 && ++this.quiet > 3) this.sp = 0; }
+    }
+    if (!this.userActive && this.sp >= .2) {
+      this.sp = 0; this.lastVoice = now; this.pauseNod = true; wakeOn();
       this.userActive = true; this.blockOutput = true; this.inputText = ''; this.turn++;
       const wasSpeaking = this.speaking; this.clearAudio(); liveOnInterrupt(wasSpeaking); this.emit('listening');
       this.send({ realtimeInput: { activityStart: {} } }); for (const q of this.pre) this.send({ realtimeInput: q }); this.pre = []; return;
     }
     if (this.userActive) {
       this.send({ realtimeInput: packet });
+      if (rms > base * .6 && f.band > .35) { this.lastVoice = now; this.pauseNod = false; wakeOn(); }   // lenient while they talk
+      else if (!this.pauseNod && now - this.lastVoice > 260) { this.pauseNod = true; liveBackchannel(); }  // nod at their pauses
       if (now - this.lastVoice > 850) { this.userActive = false; this.send({ realtimeInput: { activityEnd: {} } }); this.blockOutput = false; this.outputText = ''; this.emit('thinking'); }
     }
   },
@@ -1552,7 +1590,7 @@ const live = {
     for (let i = 0; i < n; i++) { let v = raw.charCodeAt(i * 2) | (raw.charCodeAt(i * 2 + 1) << 8); if (v >= 32768) v -= 65536; out[i] = v / 32768; }
     const node = this.ctx.createBufferSource(); node.buffer = buf; node.connect(this.analyser);
     this.nextTime = Math.max(this.nextTime || 0, this.ctx.currentTime + .025); node.start(this.nextTime); this.nextTime += buf.duration;
-    this.nodes.add(node); this.speaking = true; this.serverDone = false; if (this.state !== 'speaking') this.emit('speaking');
+    this.nodes.add(node); this.speaking = true; this.serverDone = false; wakeOn(); if (this.state !== 'speaking') this.emit('speaking');
     node.onended = () => { this.nodes.delete(node); try { node.disconnect(); } catch (e) {} if (!this.nodes.size) { this.speaking = false; if (this.ready && !this.userActive) this.emit(this.serverDone ? 'connected' : 'thinking'); } };
   },
   clearAudio() { for (const n of this.nodes) { n.onended = null; try { n.stop(); n.disconnect(); } catch (e) {} } this.nodes.clear(); this.nextTime = 0; this.speaking = false; },
@@ -1598,13 +1636,31 @@ function liveLips(T) {
   const lo = band(250, 800), mid = band(800, 1600), hi = band(1600, 3200), sib = band(4500, 9000), tot = lo + mid + hi + 1;
   const k = .45; lipBand.lo += (lo / tot - lipBand.lo) * k; lipBand.mid += (mid / tot - lipBand.mid) * k; lipBand.hi += (hi / tot - lipBand.hi) * k; lipBand.sib += (sib / (tot / 3) - lipBand.sib) * k;
   const open = clamp((vol - .006) * 7) ** .8;
-  if (open < .02) return true;
+  if (open < .02) {
+    if (st.lipLoud && T - st.lipLoud > .28 && !st.lipEnd) { st.lipEnd = true; if (Math.random() < .6) triggerBlink(.14); if (!ctl.expr && Math.random() < .5) st.nodV -= .35; }
+    return true;
+  }
+  st.lipLoud = T; st.lipEnd = false;
   const round = clamp((lipBand.lo - .38) * 3.2), wide = clamp((lipBand.hi - .26) * 3.5), s = clamp((lipBand.sib - .35) * 2);
   vis.jawOpen = open * (.72 - .3 * wide - .35 * s) ; vis.upperLipUp = open * (.24 + .1 * wide); vis.lowerLipDown = open * .22;
   vis.mouthPucker = open * round * .95; vis.mouthWide = open * (wide * .75 + s * .4) * (1 - round * .7);
-  if (open > .7 && st.lastPeak < T - .45) { st.nodV -= .9 * (open - .5); st.lastPeak = T; }
+  if (open > .7 && st.lastPeak < T - .45) { st.nodV -= .9 * (open - .5); st.lastPeak = T; if (Math.random() < .35) st.browPulse = .5; }
   return true;
 }
+
+/* Keep the screen on while talking; after 1 minute with no conversation the phone's own timeout applies again. */
+const wake = { lock: null, last: 0, pending: false };
+async function wakeOn() {
+  wake.last = performance.now();
+  if (wake.lock || wake.pending || !ai.on || document.hidden || !('wakeLock' in navigator)) return;
+  wake.pending = true;
+  try { const l = await navigator.wakeLock.request('screen'); if (!ai.on) l.release().catch(() => {}); else { wake.lock = l; l.addEventListener('release', () => { if (wake.lock === l) wake.lock = null; }); } }
+  catch (e) { /* not allowed right now (battery saver, hidden tab) */ }
+  wake.pending = false;
+}
+function wakeOff() { const l = wake.lock; wake.lock = null; if (l) l.release().catch(() => {}); }
+setInterval(() => { if (wake.lock && (!ai.on || performance.now() - wake.last > 60000)) wakeOff(); }, 5000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && ai.on && performance.now() - wake.last < 60000) { wake.lock = null; wakeOn(); } });
 
 function aiSetState(t) { $('aiState').textContent = t; }
 function aiSetMode(m) {
@@ -1629,6 +1685,7 @@ function liveTranscript(who, text, turn) {
   if (!tn) { tn = document.createTextNode(''); d.insertBefore(tn, d.querySelector('.src')); }
   tn.nodeValue = text.trim(); const log = $('chatLog'); log.scrollTop = log.scrollHeight;
   if (who === 'ai') setSubLine(text.trim().slice(-80)); else setSubLine('🎙 ' + text.trim());
+  liveMoodFrom(text, who);
 }
 function liveSources(meta, turn) {
   const d = bubble('ai', turn); let box = d.querySelector('.src');
@@ -1655,6 +1712,20 @@ function liveOnInterrupt(wasSpeaking) {
   const d = bubbles.get('ai' + live.turn) || bubbles.get('ai' + (live.turn - 1));
   if (d) d.classList.add('cut');
 }
+/* Spontaneous reactions (never override a commanded expression). */
+function liveBackchannel() {                       // "mm-hm": small nod at the user's pauses, sometimes a soft smile
+  if (ctl.expr || ctlLooking()) return;
+  st.nodV -= .45 + Math.random() * .3;
+  if (ai.userMood !== 'concern' && Math.random() < .35) st.reactSmile = .9 + Math.random() * .6;
+}
+function lastSentence(t) { const m = String(t).trim().split(/(?<=[.!?…。])\s+/); return m[m.length - 1] || ''; }
+function liveMoodFrom(text, who) {
+  const sent = lastSentence(text); if (sent.length < 3) return;
+  const m = sentenceMood(sent, 'auto');
+  if (who === 'me') { ai.userMood = m === 'concern' ? 'concern' : m === 'bright' ? 'bright' : ai.userMood; return; }
+  if (m !== st.mood) { st.mood = m; if (m === 'bright' || m === 'surprise') st.browPulse = .6; if (m === 'bright' && Math.random() < .5) st.reactSmile = 1.2; }
+}
+
 function liveNotice(t) { addMsg('err', t); toast(t, 4500); }
 const STATE_TXT = {
   connecting: ['연결 중…', 'think'], connected: ['말씀하세요. 그냥 말을 걸면 됩니다.', 'idle'], listening: ['듣고 있어요…', 'listen'],
@@ -1663,6 +1734,8 @@ const STATE_TXT = {
 };
 function liveOnState(s) {
   const [txt, mode] = STATE_TXT[s] || STATE_TXT.closed;
+  if (s === 'listening' || s === 'thinking' || s === 'searching' || s === 'speaking' || s === 'connecting') wakeOn();
+  if (s === 'listening') { ai.heard = true; ai.userMood = null; }
   aiSetMode(mode);
   aiSetState(live.muted && live.ready ? '마이크가 꺼져 있습니다. 🎤를 눌러 켜세요.' : txt);
   const mic = $('aiMic');
@@ -1695,7 +1768,7 @@ function aiToggle() {
 }
 function aiClose() {
   const wasOn = ai.on;
-  ai.on = false; ai.open = false; live.close(true); live.state = 'closed'; stopAll(true);
+  ai.on = false; ai.open = false; live.close(true); live.state = 'closed'; stopAll(true); wakeOff();
   player.text = ''; player.sentences = [];
   document.body.classList.remove('ai-on');
   $('aiPanel').classList.add('hide'); $('btnAI').classList.remove('open', 'on');
